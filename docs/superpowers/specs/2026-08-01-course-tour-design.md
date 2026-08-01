@@ -1,7 +1,7 @@
 # MIT 6.824 Course Tour — Design
 
 **Date:** 2026-08-01
-**Status:** Approved (brainstorming session with Marty)
+**Status:** Approved
 
 ## What this is
 
@@ -14,11 +14,11 @@ code and reading-question answers.
 
 | Question | Decision |
 |---|---|
-| Audience | Single user (Marty), running locally. No auth. |
+| Audience | Single user, running locally. No auth. |
 | Content | Companion frame: the app owns structure and original guidance text; papers/lab pages open via links. MIT prose is never copied. |
 | Lab submissions | The student's 6.824 lab repo is Docker-mounted read-only; the app snapshots code and runs the lab's own `go test`. |
 | Evaluation scope | Labs and reading questions. Final project excluded (v1). |
-| Architecture | Approach B: content as files in the repo, SQLite for user state only, single-shot rubric evaluation via OpenRouter. |
+| Architecture | Content as files in the repo, SQLite for user state only, single-shot rubric evaluation via OpenRouter. (Chosen over two alternatives: syncing content into the DB at boot, and an agentic tool-calling evaluator — the latter remains a possible later upgrade.) |
 | Database | SQLite on a named Docker volume. |
 
 ## Architecture
@@ -65,9 +65,15 @@ mit-distributed-systems/
 
 ### Docker
 
+The stack is defined in `docker/docker-compose.yml`; `docker compose up`
+is the one command to bring it up.
+
 - Image is Go-based (not scratch/distroless): the eval runner executes the
   lab's own `go test` inside the container.
-- Mounts: lab repo (read-only), SQLite data volume (read-write).
+- The SQLite database lives on a **named volume declared in the compose
+  file**, so state persists across image rebuilds and container recreation.
+- The lab repo is bind-mounted read-only; its host path is set via env
+  (`LAB_REPO_DIR`) or a compose `.env` file.
 
 ## Course content model
 
