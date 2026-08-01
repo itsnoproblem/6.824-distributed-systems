@@ -2,6 +2,7 @@ package eval
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
 	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
@@ -33,6 +34,17 @@ func RegisterRoutes(mux *http.ServeMux, svc EvalService) {
 			Answer: r.FormValue("answer"),
 		}
 		resp, err := answer(r.Context(), req)
+		renderSection(w, r, resp, err)
+	})
+
+	retry := makeRetryEndpoint(svc)
+	mux.HandleFunc("POST /submissions/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			api.RenderError(w, r, api.ErrInvalid)
+			return
+		}
+		resp, err := retry(r.Context(), id)
 		renderSection(w, r, resp, err)
 	})
 }

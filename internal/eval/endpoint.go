@@ -13,6 +13,8 @@ import (
 type EvalService interface {
 	StepState(ctx context.Context, ref course.StepRef) (StepEvalView, error)
 	SubmitAnswer(ctx context.Context, ref course.StepRef, answer string) error
+	Retry(ctx context.Context, id int64) error
+	RefForSubmission(ctx context.Context, id int64) (course.StepRef, error)
 }
 
 type SectionRequest struct{ Module, Step string }
@@ -54,6 +56,24 @@ func makeAnswerEndpoint(svc EvalService) api.Endpoint {
 		}
 		ref := course.StepRef{Module: req.Module, Step: req.Step}
 		if err := svc.SubmitAnswer(ctx, ref, req.Answer); err != nil {
+			return nil, err
+		}
+		view, err := svc.StepState(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		return SectionResponse{Ref: ref, View: view}, nil
+	}
+}
+
+func makeRetryEndpoint(svc EvalService) api.Endpoint {
+	return func(ctx context.Context, request any) (any, error) {
+		id := request.(int64)
+		if err := svc.Retry(ctx, id); err != nil {
+			return nil, err
+		}
+		ref, err := svc.RefForSubmission(ctx, id)
+		if err != nil {
 			return nil, err
 		}
 		view, err := svc.StepState(ctx, ref)

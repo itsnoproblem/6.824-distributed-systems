@@ -11,6 +11,7 @@ import (
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/eval"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/openrouter"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/tour"
 	"github.com/itsnoproblem/mit-distributed-systems/static"
@@ -49,8 +50,12 @@ func main() {
 	tour.RegisterRoutes(mux, tour.NewService(courseRepo, progressRepo))
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 
+	var llm eval.LLM
+	if cfg.OpenRouterKey != "" {
+		llm = openrouter.New(cfg.OpenRouterKey, cfg.OpenRouterModel)
+	}
 	evalSvc, err := eval.NewService(courseRepo, sqlite.NewSubmissionRepo(db),
-		progressRepo, nil, nil, cfg.ContentDir)
+		progressRepo, llm, nil, cfg.ContentDir)
 	if err != nil {
 		log.Fatalf("eval service: %v", err)
 	}

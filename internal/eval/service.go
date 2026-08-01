@@ -88,7 +88,8 @@ func NewService(c CourseRepo, subs SubmissionRepo, p ProgressMarker, llm LLM, la
 func (s *Service) Enabled() bool { return s.llm != nil }
 
 // SubmitAnswer stores a reading-question answer and marks the step complete.
-// (The LLM evaluation branch is added with the OpenRouter provider task.)
+// In locked mode (nil LLM) it does so without review. Otherwise it hands off
+// to evaluateQuestion, which owns the submission's status from there.
 func (s *Service) SubmitAnswer(ctx context.Context, ref course.StepRef, answer string) error {
 	_, step, ok := s.course.Course().Step(ref)
 	if !ok || step.Type != course.StepQuestion {
@@ -104,10 +105,79 @@ func (s *Service) SubmitAnswer(ctx context.Context, ref course.StepRef, answer s
 	if err != nil {
 		return err
 	}
+	if s.llm == nil {
+		// Locked mode: status flips to complete before progress is marked,
+		// so a late DB failure never leaves progress "done" while the
+		// submission itself is stuck pending.
+		if err := s.subs.UpdateSubmission(ctx, id, StatusComplete, ""); err != nil {
+			return err
+		}
+		return s.progress.SetComplete(ctx, ref, true)
+	}
 	if err := s.progress.SetComplete(ctx, ref, true); err != nil {
 		return err
 	}
+	return s.evaluateQuestion(ctx, id)
+}
+
+// evaluateQuestion runs the synchronous question-evaluation pipeline; LLM
+// failures land on the submission as StatusFailed, never as an HTTP error.
+func (s *Service) evaluateQuestion(ctx context.Context, id int64) error {
+	sub, err := s.subs.GetSubmission(ctx, id)
+	if err != nil {
+		return err
+	}
+	mod, step, ok := s.course.Course().Step(sub.Ref)
+	if !ok {
+		return fmt.Errorf("%w: step %s", api.ErrNotFound, sub.Ref)
+	}
+	if err := s.subs.UpdateSubmission(ctx, id, StatusRunning, ""); err != nil {
+		return err
+	}
+	rubric := s.rubrics["question"]
+	system, user := BuildQuestionPrompt(rubric, *mod, *step, sub.Content)
+	raw, err := s.llm.Complete(ctx, system, user)
+	if err != nil {
+		return s.subs.UpdateSubmission(ctx, id, StatusFailed, "LLM error: "+err.Error())
+	}
+	verdict, err := ParseVerdict(raw)
+	if err != nil {
+		return s.subs.UpdateSubmission(ctx, id, StatusFailed, "verdict parse error: "+err.Error())
+	}
+	if _, err := s.subs.InsertEvaluation(ctx, Evaluation{
+		SubmissionID: id, Model: s.llm.Model(), RubricVersion: rubric.Version,
+		Verdict: verdict, CreatedAt: s.now().UTC(),
+	}); err != nil {
+		return err
+	}
 	return s.subs.UpdateSubmission(ctx, id, StatusComplete, "")
+}
+
+func (s *Service) RefForSubmission(ctx context.Context, id int64) (course.StepRef, error) {
+	sub, err := s.subs.GetSubmission(ctx, id)
+	if err != nil {
+		return course.StepRef{}, fmt.Errorf("%w: submission %d", api.ErrNotFound, id)
+	}
+	return sub.Ref, nil
+}
+
+// Retry re-evaluates a failed submission. (Lab retries arrive with the lab
+// pipeline task; until then only questions are retryable.)
+func (s *Service) Retry(ctx context.Context, id int64) error {
+	sub, err := s.subs.GetSubmission(ctx, id)
+	if err != nil {
+		return fmt.Errorf("%w: submission %d", api.ErrNotFound, id)
+	}
+	if sub.Status != StatusFailed {
+		return fmt.Errorf("%w: submission %d is %s, not failed", api.ErrInvalid, id, sub.Status)
+	}
+	if s.llm == nil {
+		return fmt.Errorf("%w: evaluation mode is locked", api.ErrInvalid)
+	}
+	if sub.Kind != KindQuestion {
+		return fmt.Errorf("%w: lab retry requires the lab pipeline", api.ErrInvalid)
+	}
+	return s.evaluateQuestion(ctx, id)
 }
 
 func (s *Service) StepState(ctx context.Context, ref course.StepRef) (StepEvalView, error) {
