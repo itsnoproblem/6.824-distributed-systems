@@ -179,5 +179,5 @@ func loadStep(path string) (course.Step, error) {
 // Repo is the injectable wrapper satisfying each feature's CourseRepo interface.
 type Repo struct{ c *course.Course }
 
-func NewRepo(c *course.Course) *Repo     { return &Repo{c} }
-func (r *Repo) Course() *course.Course   { return r.c }
+func NewRepo(c *course.Course) *Repo   { return &Repo{c} }
+func (r *Repo) Course() *course.Course { return r.c }
