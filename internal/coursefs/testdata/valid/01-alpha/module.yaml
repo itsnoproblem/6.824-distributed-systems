@@ -1,0 +1,5 @@
+title: "Alpha Lecture"
+kind: lecture
+order: 1
+links:
+  paper: "https://example.com/paper.pdf"

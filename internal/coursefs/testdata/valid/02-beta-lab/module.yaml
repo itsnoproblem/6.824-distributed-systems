@@ -1,0 +1,5 @@
+title: "Beta Lab"
+kind: lab
+order: 2
+links:
+  lab: "https://example.com/lab.html"
