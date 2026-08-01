@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,7 @@ type SubmissionRepo interface {
 	LatestForStep(ctx context.Context, ref course.StepRef) (*Submission, error)
 	InsertEvaluation(ctx context.Context, e Evaluation) (int64, error)
 	EvaluationForSubmission(ctx context.Context, submissionID int64) (*Evaluation, error)
+	FailInterrupted(ctx context.Context) (int64, error)
 }
 
 type StepEvalView struct {
@@ -88,6 +90,14 @@ func NewService(c CourseRepo, subs SubmissionRepo, p ProgressMarker, llm LLM, la
 }
 
 func (s *Service) Enabled() bool { return s.llm != nil }
+
+// RecoverInterrupted marks submissions left pending/running by a previous
+// process as failed so the UI offers a retry instead of polling forever.
+// Called once at boot; any such row is necessarily orphaned (single user,
+// single process).
+func (s *Service) RecoverInterrupted(ctx context.Context) (int64, error) {
+	return s.subs.FailInterrupted(ctx)
+}
 
 // SubmitAnswer stores a reading-question answer and marks the step complete.
 // In locked mode (nil LLM) it does so without review. Otherwise it hands off
@@ -206,6 +216,7 @@ func (s *Service) evaluateLab(id int64) {
 	ctx := context.Background()
 	sub, err := s.subs.GetSubmission(ctx, id)
 	if err != nil {
+		log.Printf("evaluateLab: load submission %d: %v", id, err)
 		return
 	}
 	mod, step, ok := s.course.Course().Step(sub.Ref)

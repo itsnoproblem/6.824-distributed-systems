@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,58 @@ func TestSubmissionLifecycle(t *testing.T) {
 	latest, err := repo.LatestForStep(ctx, ref)
 	if err != nil || latest == nil || latest.ID != id {
 		t.Fatalf("latest: %v %v", latest, err)
+	}
+}
+
+func TestFailInterrupted(t *testing.T) {
+	repo := subRepo(t)
+	ctx := context.Background()
+
+	mk := func(step string, status eval.Status) int64 {
+		id, err := repo.InsertSubmission(ctx, eval.Submission{
+			Ref: course.StepRef{Module: "m1", Step: step}, Kind: eval.KindLab,
+			Content: "{}", Status: status, CreatedAt: time.Now(),
+		})
+		if err != nil {
+			t.Fatalf("insert %s: %v", step, err)
+		}
+		return id
+	}
+
+	runningID := mk("running", eval.StatusRunning)
+	pendingID := mk("pending", eval.StatusPending)
+	completeID := mk("complete", eval.StatusComplete)
+
+	n, err := repo.FailInterrupted(ctx)
+	if err != nil {
+		t.Fatalf("FailInterrupted: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("n = %d, want 2", n)
+	}
+
+	for _, id := range []int64{runningID, pendingID} {
+		got, err := repo.GetSubmission(ctx, id)
+		if err != nil {
+			t.Fatalf("get %d: %v", id, err)
+		}
+		if got.Status != eval.StatusFailed {
+			t.Fatalf("id %d status = %s, want failed", id, got.Status)
+		}
+		if !strings.Contains(got.TestOutput, "INTERRUPTED") {
+			t.Fatalf("id %d test_output = %q, want INTERRUPTED marker", id, got.TestOutput)
+		}
+	}
+
+	complete, err := repo.GetSubmission(ctx, completeID)
+	if err != nil {
+		t.Fatalf("get complete: %v", err)
+	}
+	if complete.Status != eval.StatusComplete {
+		t.Fatalf("complete submission status changed to %s", complete.Status)
+	}
+	if strings.Contains(complete.TestOutput, "INTERRUPTED") {
+		t.Fatalf("complete submission test_output was touched: %q", complete.TestOutput)
 	}
 }
 

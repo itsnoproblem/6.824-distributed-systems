@@ -34,6 +34,18 @@ func (r *SubmissionRepo) UpdateSubmission(ctx context.Context, id int64, status 
 	return err
 }
 
+// FailInterrupted marks submissions left pending/running by a previous
+// process (killed mid-evaluation) as failed, so the UI offers a retry
+// instead of polling forever.
+func (r *SubmissionRepo) FailInterrupted(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE submissions SET status = 'failed', test_output = test_output || CASE WHEN test_output = '' THEN '' ELSE char(10) END || 'INTERRUPTED: evaluation did not survive a server restart; retry to re-run.' WHERE status IN ('pending','running')`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 const subCols = "id, module_slug, step_slug, kind, content, test_output, status, created_at"
 
 func scanSubmission(row interface{ Scan(...any) error }) (eval.Submission, error) {

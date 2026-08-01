@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -58,6 +59,11 @@ func main() {
 		progressRepo, llm, eval.FSLabRepo{Dir: cfg.LabRepoDir}, cfg.ContentDir)
 	if err != nil {
 		log.Fatalf("eval service: %v", err)
+	}
+	if n, err := evalSvc.RecoverInterrupted(context.Background()); err != nil {
+		log.Fatalf("recover interrupted submissions: %v", err)
+	} else if n > 0 {
+		log.Printf("marked %d interrupted submission(s) failed", n)
 	}
 	eval.RegisterRoutes(mux, evalSvc)
 	log.Printf("evaluation mode enabled: %v", evalSvc.Enabled())

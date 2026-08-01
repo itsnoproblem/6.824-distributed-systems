@@ -4,6 +4,7 @@
 package e2e
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
@@ -55,6 +56,9 @@ func newApp(t *testing.T, o options) *app {
 		eval.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state
 	if err != nil {
 		t.Fatalf("eval service: %v", err)
+	}
+	if _, err := evalSvc.RecoverInterrupted(context.Background()); err != nil {
+		t.Fatalf("recover interrupted submissions: %v", err)
 	}
 	eval.RegisterRoutes(mux, evalSvc)
 

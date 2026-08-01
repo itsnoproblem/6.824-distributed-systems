@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -48,6 +49,20 @@ func (l FSLabRepo) RunTests(ctx context.Context, workdir string, cmd []string, t
 	defer cancel()
 	c := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
 	c.Dir = filepath.Join(l.Dir, workdir)
+	// go test spawns the compiled test binary as a child process; a hung or
+	// deadlocked test (e.g. a stuck Raft goroutine) can outlive `go test`
+	// itself once that parent is killed, holding the stdout/stderr pipes
+	// open so CombinedOutput blocks past the timeout. Run the whole tree in
+	// its own process group so cancellation can kill it all at once, and cap
+	// how long we wait for the pipes to close after that kill.
+	c.WaitDelay = 5 * time.Second
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error {
+		if c.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+	}
 	raw, err := c.CombinedOutput()
 	out := truncateTail(string(raw), 64*1024)
 	if ctx.Err() == context.DeadlineExceeded {
