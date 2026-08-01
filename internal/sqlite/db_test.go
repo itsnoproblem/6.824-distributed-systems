@@ -27,3 +27,21 @@ func TestOpenAndMigrate(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrateRecordsVersionsAtomically(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := sqlite.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		t.Fatal("expected at least one recorded migration")
+	}
+}

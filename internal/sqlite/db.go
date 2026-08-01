@@ -51,13 +51,32 @@ func Migrate(db *sql.DB) error {
 		if err != nil {
 			return err
 		}
-		if _, err := db.Exec(string(raw)); err != nil {
-			return fmt.Errorf("migration %s: %w", name, err)
-		}
-		if _, err := db.Exec(
-			"INSERT INTO schema_migrations (version) VALUES (?)", name); err != nil {
+		if err := applyMigration(db, name, string(raw)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// applyMigration runs a migration's SQL and records its version atomically,
+// so a crash between the two never leaves the schema and schema_migrations
+// out of sync (which would otherwise wedge Migrate on the next startup).
+func applyMigration(db *sql.DB, name, sqlText string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("migration %s: %w", name, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once Commit succeeds
+
+	if _, err := tx.Exec(sqlText); err != nil {
+		return fmt.Errorf("migration %s: %w", name, err)
+	}
+	if _, err := tx.Exec(
+		"INSERT INTO schema_migrations (version) VALUES (?)", name); err != nil {
+		return fmt.Errorf("migration %s: %w", name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("migration %s: %w", name, err)
 	}
 	return nil
 }
