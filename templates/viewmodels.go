@@ -49,3 +49,27 @@ type ModuleNotesVM struct {
 }
 
 type NotesIndexVM struct{ Groups []ModuleNotesVM }
+
+type CriterionVM struct {
+	Name          string
+	Score         int
+	Justification string
+}
+
+type ReportVM struct {
+	Model, RubricVersion, Summary string
+	Criteria                      []CriterionVM
+	NextSteps                     []string
+}
+
+type EvalSectionVM struct {
+	ModuleSlug, StepSlug string
+	Type                 string
+	Enabled              bool
+	Question             string
+	Answer               string
+	Status               string
+	SubmissionID         int64
+	TestOutput           string
+	Report               *ReportVM
+}

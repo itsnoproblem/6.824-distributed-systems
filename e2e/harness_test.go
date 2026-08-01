@@ -11,13 +11,16 @@ import (
 	"testing"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/eval"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/tour"
 )
 
 type options struct {
-	ContentDir string // defaults to e2e/testdata/content
+	ContentDir string       // defaults to e2e/testdata/content
+	LLM        eval.LLM     // nil = locked mode
+	Lab        eval.LabRepo // nil until a test needs lab submission
 }
 
 type app struct {
@@ -46,6 +49,15 @@ func newApp(t *testing.T, o options) *app {
 	mux := http.NewServeMux()
 	tour.RegisterRoutes(mux, tour.NewService(courseRepo, sqlite.NewProgressRepo(db)))
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
+
+	evalSvc, err := eval.NewService(courseRepo, sqlite.NewSubmissionRepo(db),
+		sqlite.NewProgressRepo(db), o.LLM, o.Lab, o.ContentDir,
+		eval.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state
+	if err != nil {
+		t.Fatalf("eval service: %v", err)
+	}
+	eval.RegisterRoutes(mux, evalSvc)
+
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return &app{TS: ts, DB: db}

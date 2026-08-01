@@ -1,0 +1,86 @@
+package templates
+
+import "fmt"
+
+templ EvalSection(v EvalSectionVM) {
+	if v.Type == "question" {
+		@QuestionForm(v)
+	} else {
+		@LabSection(v)
+	}
+}
+
+templ QuestionForm(v EvalSectionVM) {
+	<div class="eval">
+		<h3>Reading question</h3>
+		<blockquote class="question">{ v.Question }</blockquote>
+		<form hx-post={ "/modules/" + v.ModuleSlug + "/steps/" + v.StepSlug + "/answer" }
+			hx-target="#eval-section" hx-swap="innerHTML">
+			<textarea name="answer" rows="8" required>{ v.Answer }</textarea>
+			if v.Enabled {
+				<button class="btn">Submit for evaluation</button>
+			} else {
+				<button class="btn">Save answer</button>
+			}
+		</form>
+		if !v.Enabled {
+			<p class="locked">
+				Evaluation mode is locked — set OPENROUTER_API_KEY to get LLM feedback.
+				Answers are still saved.
+			</p>
+		}
+		@SubmissionResult(v)
+	</div>
+}
+
+templ SubmissionResult(v EvalSectionVM) {
+	if v.Status == "failed" {
+		<div class="eval-failed">
+			<p>Evaluation failed.</p>
+			if v.TestOutput != "" {
+				<pre class="test-output">{ v.TestOutput }</pre>
+			}
+			<button class="btn" hx-post={ fmt.Sprintf("/submissions/%d/retry", v.SubmissionID) }
+				hx-target="#eval-section" hx-swap="innerHTML">Retry evaluation</button>
+		</div>
+	}
+	if v.Status == "complete" && v.Report == nil && v.SubmissionID != 0 && v.Type == "question" {
+		<p class="saved">✓ Answer saved.</p>
+	}
+	if v.Report != nil {
+		@Report(*v.Report)
+	}
+}
+
+templ Report(r ReportVM) {
+	<div class="report">
+		<h4>Evaluation — { r.Model } <span class="rubric-v">rubric v{ r.RubricVersion }</span></h4>
+		<table>
+			<tr><th>Criterion</th><th>Score</th><th>Justification</th></tr>
+			for _, c := range r.Criteria {
+				<tr>
+					<td>{ c.Name }</td>
+					<td>{ fmt.Sprintf("%d/5", c.Score) }</td>
+					<td>{ c.Justification }</td>
+				</tr>
+			}
+		</table>
+		<p>{ r.Summary }</p>
+		if len(r.NextSteps) > 0 {
+			<h5>Suggested next steps</h5>
+			<ul>
+				for _, s := range r.NextSteps {
+					<li>{ s }</li>
+				}
+			</ul>
+		}
+	</div>
+}
+
+// LabSection is a stub until the lab-evaluation pipeline task replaces it.
+templ LabSection(v EvalSectionVM) {
+	<div class="eval">
+		<h3>Submit this lab part</h3>
+		<p class="locked">Lab submission arrives with the evaluation pipeline.</p>
+	</div>
+}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/config"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/eval"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/tour"
@@ -42,10 +43,19 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 	courseRepo := coursefs.NewRepo(crs)
+	progressRepo := sqlite.NewProgressRepo(db)
 
 	mux := newMux()
-	tour.RegisterRoutes(mux, tour.NewService(courseRepo, sqlite.NewProgressRepo(db)))
+	tour.RegisterRoutes(mux, tour.NewService(courseRepo, progressRepo))
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
+
+	evalSvc, err := eval.NewService(courseRepo, sqlite.NewSubmissionRepo(db),
+		progressRepo, nil, nil, cfg.ContentDir)
+	if err != nil {
+		log.Fatalf("eval service: %v", err)
+	}
+	eval.RegisterRoutes(mux, evalSvc)
+	log.Printf("evaluation mode enabled: %v", evalSvc.Enabled())
 
 	log.Printf("tour listening on :%s", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
