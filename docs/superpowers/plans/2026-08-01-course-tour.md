@@ -41,7 +41,7 @@ internal/eval/prompts.go          # rubric/guidance loading + prompt assembly
 internal/eval/verdict.go          # LLM output → Verdict parsing
 internal/eval/labrepo.go          # FSLabRepo: Snapshot + RunTests against mounted repo
 internal/openrouter/client.go     # eval.LLM implementation
-internal/apptest/apptest.go       # test-only full-stack wiring helper
+e2e/                              # dedicated integration-test package: harness + per-feature suites + testdata
 templates/viewmodels.go           # plain-Go view models (templates never import features)
 templates/*.templ                 # document, coursemap, step, notes, eval
 static/{static.go,styles.css,htmx.min.js}
@@ -1457,8 +1457,8 @@ git add internal/sqlite && git commit -m "feat: sqlite open/migrate and progress
 
 **Files:**
 - Create: `templates/viewmodels.go`, `templates/document.templ`, `templates/coursemap.templ`, `templates/step.templ`
-- Create: `internal/tour/service.go`, `internal/tour/service_test.go`, `internal/tour/endpoint.go`, `internal/tour/transport.go`, `internal/tour/integration_test.go`
-- Create: `internal/apptest/apptest.go`, `internal/apptest/testdata/content/modules/…` (below)
+- Create: `internal/tour/service.go`, `internal/tour/service_test.go`, `internal/tour/endpoint.go`, `internal/tour/transport.go`, `e2e/tour_test.go`
+- Create: `e2e/harness_test.go`, `e2e/tour_test.go`, `e2e/testdata/content/modules/…` (below)
 - Modify: `cmd/tour/main.go` (wire course + db + tour routes)
 
 **Interfaces:**
@@ -1468,7 +1468,7 @@ git add internal/sqlite && git commit -m "feat: sqlite open/migrate and progress
   - Service methods: `CourseMap(ctx) (CourseMapView, error)`, `StepPage(ctx, course.StepRef) (StepView, error)`, `SetComplete(ctx, course.StepRef, bool) error`.
   - `tour.RegisterRoutes(mux *http.ServeMux, svc TourService)`.
   - Templates: `Document(title string, body templ.Component)`, `CourseMap(CourseMapVM)`, `StepPage(StepVM)`, `CompleteToggle(moduleSlug, stepSlug string, completed bool)`, `StepURL(module, step string) string`.
-  - `apptest.New(t *testing.T, o Options) *App` with `App{TS *httptest.Server; DB *sql.DB}`, `Options{ContentDir string}` — later tasks extend Options.
+  - e2e harness (test-only, package `e2e`): `newApp(t *testing.T, o options) *app` with `app{TS *httptest.Server; DB *sql.DB}` and `options{ContentDir string}` — later tasks extend `options`.
 
 - [ ] **Step 1: Write template view models** — `templates/viewmodels.go`:
 
@@ -2023,16 +2023,16 @@ func stepVM(v StepView) templates.StepVM {
 }
 ```
 
-- [ ] **Step 7: Write the apptest helper and its testdata**
+- [ ] **Step 7: Write the e2e harness and its testdata**
 
-`internal/apptest/testdata/content/modules/01-test-lecture/module.yaml`:
+`e2e/testdata/content/modules/01-test-lecture/module.yaml`:
 ```yaml
 title: "Test Lecture"
 kind: lecture
 order: 1
 ```
 
-`internal/apptest/testdata/content/modules/01-test-lecture/steps/01-read.md`:
+`e2e/testdata/content/modules/01-test-lecture/steps/01-read.md`:
 ```markdown
 ---
 title: Read something
@@ -2042,7 +2042,7 @@ type: reading
 Test reading body.
 ```
 
-`internal/apptest/testdata/content/modules/01-test-lecture/steps/02-question.md`:
+`e2e/testdata/content/modules/01-test-lecture/steps/02-question.md`:
 ```markdown
 ---
 title: Test question
@@ -2054,14 +2054,14 @@ question: |
 Answer below.
 ```
 
-`internal/apptest/testdata/content/modules/02-test-lab/module.yaml`:
+`e2e/testdata/content/modules/02-test-lab/module.yaml`:
 ```yaml
 title: "Test Lab"
 kind: lab
 order: 2
 ```
 
-`internal/apptest/testdata/content/modules/02-test-lab/steps/01-submit.md`:
+`e2e/testdata/content/modules/02-test-lab/steps/01-submit.md`:
 ```markdown
 ---
 title: Submit test lab
@@ -2076,18 +2076,18 @@ eval:
 Submit it.
 ```
 
-`internal/apptest/apptest.go`:
+`e2e/harness_test.go`:
 ```go
-// Package apptest wires a full application over a temp database and testdata
-// content for integration tests. Test-only.
-package apptest
+// Package e2e wires a full application over a temp database and testdata
+// content, and drives it over HTTP the way a browser would. Dedicated
+// integration-test package; contains only _test.go files.
+package e2e
 
 import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
@@ -2095,20 +2095,19 @@ import (
 	"github.com/itsnoproblem/mit-distributed-systems/internal/tour"
 )
 
-type Options struct {
-	ContentDir string // defaults to internal/apptest/testdata/content
+type options struct {
+	ContentDir string // defaults to e2e/testdata/content
 }
 
-type App struct {
+type app struct {
 	TS *httptest.Server
 	DB *sql.DB
 }
 
-func New(t *testing.T, o Options) *App {
+func newApp(t *testing.T, o options) *app {
 	t.Helper()
 	if o.ContentDir == "" {
-		_, file, _, _ := runtime.Caller(0)
-		o.ContentDir = filepath.Join(filepath.Dir(file), "testdata", "content")
+		o.ContentDir = "testdata/content" // go test runs with the package dir as cwd
 	}
 	crs, err := coursefs.Load(filepath.Join(o.ContentDir, "modules"))
 	if err != nil {
@@ -2127,14 +2126,14 @@ func New(t *testing.T, o Options) *App {
 	tour.RegisterRoutes(mux, tour.NewService(courseRepo, sqlite.NewProgressRepo(db)))
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return &App{TS: ts, DB: db}
+	return &app{TS: ts, DB: db}
 }
 ```
 
-- [ ] **Step 8: Write the failing integration test** — `internal/tour/integration_test.go`:
+- [ ] **Step 8: Write the failing integration test** — `e2e/tour_test.go`:
 
 ```go
-package tour_test
+package e2e
 
 import (
 	"io"
@@ -2142,8 +2141,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-
-	"github.com/itsnoproblem/mit-distributed-systems/internal/apptest"
 )
 
 func get(t *testing.T, url string) (int, string) {
@@ -2158,7 +2155,7 @@ func get(t *testing.T, url string) (int, string) {
 }
 
 func TestBrowseAndComplete(t *testing.T) {
-	app := apptest.New(t, apptest.Options{})
+	app := newApp(t, options{})
 
 	code, body := get(t, app.TS.URL+"/")
 	if code != 200 || !strings.Contains(body, "Test Lecture") || !strings.Contains(body, "Test Lab") {
@@ -2245,10 +2242,10 @@ git add -A && git commit -m "feat: tour feature - course map, step pages, progre
 ### Task 7: Notes — drawer, index, CRUD
 
 **Files:**
-- Create: `internal/notes/service.go`, `internal/notes/service_test.go`, `internal/notes/endpoint.go`, `internal/notes/transport.go`, `internal/notes/integration_test.go`
+- Create: `internal/notes/service.go`, `internal/notes/service_test.go`, `internal/notes/endpoint.go`, `internal/notes/transport.go`, `e2e/notes_test.go`
 - Create: `internal/sqlite/notes.go`, `internal/sqlite/notes_test.go`
 - Create: `templates/notes.templ`
-- Modify: `templates/viewmodels.go` (add note VMs), `internal/apptest/apptest.go` (wire notes), `cmd/tour/main.go` (wire notes)
+- Modify: `templates/viewmodels.go` (add note VMs), `e2e/harness_test.go` (wire notes), `cmd/tour/main.go` (wire notes)
 
 **Interfaces:**
 - Consumes: `course.StepRef`, `coursefs.Repo`, `sqlite` db.
@@ -2941,18 +2938,18 @@ Add the import `"github.com/a-h/templ"` for the `templ.Component` return type, a
 func (s *Service) Get(ctx context.Context, id int64) (Note, error) { return s.repo.Get(ctx, id) }
 ```
 
-- [ ] **Step 8: Wire notes into apptest and main**
+- [ ] **Step 8: Wire notes into the e2e harness and main**
 
-In `internal/apptest/apptest.go` add after the tour registration:
+In `e2e/harness_test.go` add after the tour registration:
 ```go
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 ```
 (import `internal/notes`). In `cmd/tour/main.go` add the same line after `tour.RegisterRoutes`.
 
-- [ ] **Step 9: Write the failing integration test** — `internal/notes/integration_test.go`:
+- [ ] **Step 9: Write the failing integration test** — `e2e/notes_test.go`:
 
 ```go
-package notes_test
+package e2e
 
 import (
 	"io"
@@ -2960,12 +2957,10 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-
-	"github.com/itsnoproblem/mit-distributed-systems/internal/apptest"
 )
 
 func TestNotesFlow(t *testing.T) {
-	app := apptest.New(t, apptest.Options{})
+	app := newApp(t, options{})
 
 	// add a note from a step
 	resp, err := http.PostForm(app.TS.URL+"/notes", url.Values{
@@ -3021,11 +3016,11 @@ git add -A && git commit -m "feat: notes - drawer, index, CRUD"
 ### Task 8: Evaluation foundation — submissions, locked-mode question answers
 
 **Files:**
-- Create: `internal/eval/models.go`, `internal/eval/prompts.go` (rubric loading only — prompt builders arrive in Task 9), `internal/eval/service.go`, `internal/eval/service_test.go`, `internal/eval/endpoint.go`, `internal/eval/transport.go`, `internal/eval/integration_test.go`
+- Create: `internal/eval/models.go`, `internal/eval/prompts.go` (rubric loading only — prompt builders arrive in Task 9), `internal/eval/service.go`, `internal/eval/service_test.go`, `internal/eval/endpoint.go`, `internal/eval/transport.go`, `e2e/eval_test.go`
 - Create: `internal/sqlite/submissions.go`, `internal/sqlite/submissions_test.go`
 - Create: `templates/eval.templ`; `content/rubric/question.md`, `content/rubric/lab.md`
-- Create: `internal/apptest/testdata/content/rubric/{question.md,lab.md}`
-- Modify: `templates/viewmodels.go` (eval VMs), `internal/apptest/apptest.go` (Options.LLM/Options.Lab + eval wiring), `cmd/tour/main.go` (wire eval)
+- Create: `e2e/testdata/content/rubric/{question.md,lab.md}`
+- Modify: `templates/viewmodels.go` (eval VMs), `e2e/harness_test.go` (options.LLM/options.Lab + eval wiring), `cmd/tour/main.go` (wire eval)
 
 **Interfaces:**
 - Consumes: `course.*`, `sqlite`, `api.*`, templates.
@@ -3299,7 +3294,7 @@ func (r *SubmissionRepo) EvaluationForSubmission(ctx context.Context, submission
 
 Run: `go test ./internal/sqlite/` — Expected: PASS
 
-- [ ] **Step 4: Author the rubrics** (both real content and apptest testdata)
+- [ ] **Step 4: Author the rubrics** (both real content and e2e testdata)
 
 `content/rubric/question.md`:
 ```markdown
@@ -3339,7 +3334,7 @@ Justify every score with concrete references to files and functions. In
 important first.
 ```
 
-Copy the same two files to `internal/apptest/testdata/content/rubric/question.md` and `internal/apptest/testdata/content/rubric/lab.md` (identical bodies are fine — the loader only needs valid files).
+Copy the same two files to `e2e/testdata/content/rubric/question.md` and `e2e/testdata/content/rubric/lab.md` (identical bodies are fine — the loader only needs valid files).
 
 - [ ] **Step 5: Write failing rubric-loader + service tests** — add to `internal/eval/service_test.go`:
 
@@ -3889,12 +3884,12 @@ func sectionVM(ref course.StepRef, v StepEvalView) templates.EvalSectionVM {
 }
 ```
 
-- [ ] **Step 11: Wire eval into apptest and main**
+- [ ] **Step 11: Wire eval into the e2e harness and main**
 
-`internal/apptest/apptest.go` — extend Options and wiring (full updated file
+`e2e/harness_test.go` — extend `options` and the wiring (full updated file
 sections):
 ```go
-type Options struct {
+type options struct {
 	ContentDir string
 	LLM        eval.LLM     // nil = locked mode
 	Lab        eval.LabRepo // nil until a test needs lab submission
@@ -3923,10 +3918,10 @@ after the notes registration:
 	log.Printf("evaluation mode enabled: %v", evalSvc.Enabled())
 ```
 
-- [ ] **Step 12: Write the failing integration test** — `internal/eval/integration_test.go`:
+- [ ] **Step 12: Write the failing integration test** — `e2e/eval_test.go`:
 
 ```go
-package eval_test
+package e2e
 
 import (
 	"io"
@@ -3934,8 +3929,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-
-	"github.com/itsnoproblem/mit-distributed-systems/internal/apptest"
 )
 
 func fetch(t *testing.T, url string) string {
@@ -3950,7 +3943,7 @@ func fetch(t *testing.T, url string) string {
 }
 
 func TestQuestionLockedMode(t *testing.T) {
-	app := apptest.New(t, apptest.Options{})
+	app := newApp(t, options{})
 
 	body := fetch(t, app.TS.URL+"/eval/section?module=01-test-lecture&step=02-question")
 	if !strings.Contains(body, "locked") || !strings.Contains(body, "What is a distributed system?") {
@@ -3997,7 +3990,7 @@ git add -A && git commit -m "feat: eval foundation - submissions, locked-mode an
 **Files:**
 - Create: `internal/openrouter/client.go`, `internal/openrouter/client_test.go`, `internal/openrouter/live_test.go`
 - Create: `internal/eval/verdict.go`, `internal/eval/verdict_test.go`, `internal/eval/prompts_test.go`
-- Modify: `internal/eval/prompts.go` (prompt builders), `internal/eval/service.go` (LLM branch + retry), `internal/eval/endpoint.go` (+Retry/RefForSubmission), `internal/eval/transport.go` (+retry route), `internal/eval/integration_test.go` (+fake LLM tests), `cmd/tour/main.go` (construct client from config)
+- Modify: `internal/eval/prompts.go` (prompt builders), `internal/eval/service.go` (LLM branch + retry), `internal/eval/endpoint.go` (+Retry/RefForSubmission), `internal/eval/transport.go` (+retry route), `e2e/eval_test.go` (+fake LLM tests), `cmd/tour/main.go` (construct client from config)
 
 **Interfaces:**
 - Consumes: `eval.LLM` (implements it), `eval.Rubric`, `course.*`.
@@ -4500,7 +4493,7 @@ In `internal/eval/transport.go` `RegisterRoutes`, add:
 
 (add import `"strconv"`).
 
-- [ ] **Step 10: Integration tests with a fake LLM** — append to `internal/eval/integration_test.go`:
+- [ ] **Step 10: Integration tests with a fake LLM** — append to `e2e/eval_test.go`:
 
 ```go
 type fakeLLM struct {
@@ -4516,7 +4509,7 @@ const goodVerdict = "```json\n" +
 	`"summary":"Good answer.","next_steps":["reread the failure model section"]}` + "\n```"
 
 func TestQuestionEvaluated(t *testing.T) {
-	app := apptest.New(t, apptest.Options{LLM: fakeLLM{resp: goodVerdict}})
+	app := newApp(t, options{LLM: fakeLLM{resp: goodVerdict}})
 	resp, err := http.PostForm(app.TS.URL+"/modules/01-test-lecture/steps/02-question/answer",
 		url.Values{"answer": {"my considered answer"}})
 	if err != nil {
@@ -4533,7 +4526,7 @@ func TestQuestionEvaluated(t *testing.T) {
 }
 
 func TestLLMFailureIsRecordedAndRetryable(t *testing.T) {
-	app := apptest.New(t, apptest.Options{LLM: fakeLLM{err: errors.New("boom")}})
+	app := newApp(t, options{LLM: fakeLLM{err: errors.New("boom")}})
 	resp, err := http.PostForm(app.TS.URL+"/modules/01-test-lecture/steps/02-question/answer",
 		url.Values{"answer": {"attempt"}})
 	if err != nil {
@@ -4588,7 +4581,7 @@ git add -A && git commit -m "feat: openrouter provider and question evaluation w
 - Create: `internal/eval/labrepo.go`, `internal/eval/labrepo_test.go`
 - Create: `internal/eval/testdata/fakerepo/go.mod`, `internal/eval/testdata/fakerepo/src/hello/hello_test.go`
 - Create: `content/guidance/lab-01-mapreduce.md`
-- Modify: `internal/eval/service.go` (SubmitLab + evaluateLab + full Retry), `internal/eval/endpoint.go` (+SubmitLab), `internal/eval/transport.go` (+submit-lab, +section-by-submission routes), `templates/eval.templ` (real LabSection), `internal/eval/integration_test.go` (+lab tests), `cmd/tour/main.go` (FSLabRepo)
+- Modify: `internal/eval/service.go` (SubmitLab + evaluateLab + full Retry), `internal/eval/endpoint.go` (+SubmitLab), `internal/eval/transport.go` (+submit-lab, +section-by-submission routes), `templates/eval.templ` (real LabSection), `e2e/eval_test.go` (+lab tests), `cmd/tour/main.go` (FSLabRepo)
 
 **Interfaces:**
 - Consumes: `eval.LabRepo` (implements as `FSLabRepo`), `course.EvalMeta`, fakeLLM/goodVerdict from Task 9's integration test file.
@@ -4964,7 +4957,7 @@ Lab-specific pitfalls to check:
   re-issue or non-atomic output — say so explicitly if the output shows it.
 ```
 
-- [ ] **Step 8: Integration tests** — append to `internal/eval/integration_test.go` (reuses `fakeLLM`/`goodVerdict` from Task 9; add imports `"time"`):
+- [ ] **Step 8: Integration tests** — append to `e2e/eval_test.go` (reuses `fakeLLM`/`goodVerdict` from Task 9; add imports `"time"`):
 
 ```go
 type stubLab struct {
@@ -4979,11 +4972,11 @@ func (s stubLab) RunTests(context.Context, string, []string, time.Duration) (str
 }
 
 func TestLabSubmitEvaluated(t *testing.T) {
-	app := apptest.New(t, apptest.Options{
+	app := newApp(t, options{
 		LLM: fakeLLM{resp: goodVerdict},
 		Lab: stubLab{files: map[string]string{"src/x/x.go": "package x"}, out: "PASS\nok"},
 	})
-	// apptest uses a synchronous runner, so the pipeline finishes before the response
+	// the e2e harness uses a synchronous runner, so the pipeline finishes before the response
 	resp, err := http.Post(app.TS.URL+"/modules/02-test-lab/steps/01-submit/submit-lab", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -5003,7 +4996,7 @@ func TestLabSubmitEvaluated(t *testing.T) {
 }
 
 func TestLabRunnerFailure(t *testing.T) {
-	app := apptest.New(t, apptest.Options{
+	app := newApp(t, options{
 		LLM: fakeLLM{resp: goodVerdict},
 		Lab: stubLab{files: map[string]string{"a.go": "package a"}, out: "partial output",
 			err: errors.New("test run timed out after 1m0s")},

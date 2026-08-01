@@ -191,9 +191,10 @@ evaluation as locked.
 - OpenRouter provider: contract test against recorded responses + an
   env-gated live smoke test.
 - `coursefs`: golden-file parse tests over the real `content/` tree.
-- Integration: httptest servers against a real temp-file SQLite database,
-  exercising browse → note → complete → submit → evaluate end to end with a
-  fake LLM provider.
+- Integration: a dedicated `e2e/` package (mirroring the convention of the
+  reference codebase) runs httptest servers against a real temp-file SQLite
+  database, exercising browse → note → complete → submit → evaluate end to
+  end with a fake LLM provider.
 
 ## Out of scope (v1)
 
