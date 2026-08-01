@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
@@ -80,6 +81,38 @@ func TestSubmitAnswerLocked(t *testing.T) {
 	done, _ := env.progress.Completed(ctx)
 	if _, ok := done[ref]; !ok {
 		t.Fatal("answer should mark step complete")
+	}
+}
+
+// cancelingLLM simulates an HTTP client disconnecting mid-request: the
+// context passed to SubmitAnswer is canceled from within Complete, mimicking
+// r.Context() being canceled while the LLM call is in flight.
+type cancelingLLM struct{ cancel context.CancelFunc }
+
+func (f cancelingLLM) Complete(_ context.Context, _, _ string) (string, error) {
+	f.cancel()
+	return "", context.Canceled
+}
+func (f cancelingLLM) Model() string { return "fake/model" }
+
+func TestSubmitAnswerRecordsFailureAfterRequestCancelation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	env := newEnv(t, cancelingLLM{cancel: cancel})
+	ref := course.StepRef{Module: "m1", Step: "q1"}
+
+	if err := env.svc.SubmitAnswer(ctx, ref, "because"); err != nil {
+		t.Fatalf("SubmitAnswer returned error: %v", err)
+	}
+
+	view, err := env.svc.StepState(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Submission == nil || view.Submission.Status != eval.StatusFailed {
+		t.Fatalf("submission = %+v, want StatusFailed", view.Submission)
+	}
+	if !strings.Contains(view.Submission.TestOutput, "LLM error") {
+		t.Fatalf("test output = %q, want it to contain %q", view.Submission.TestOutput, "LLM error")
 	}
 }
 

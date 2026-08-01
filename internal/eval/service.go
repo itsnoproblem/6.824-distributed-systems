@@ -134,23 +134,32 @@ func (s *Service) evaluateQuestion(ctx context.Context, id int64) error {
 	if err := s.subs.UpdateSubmission(ctx, id, StatusRunning, ""); err != nil {
 		return err
 	}
+	// From here on, persist outcomes on a context that survives cancelation
+	// of the inbound request. If the HTTP client disconnects during the
+	// (long) LLM call, r.Context() is canceled; without this, the
+	// failure-recording write below would itself fail and strand the
+	// submission at StatusRunning forever, with no recovery path since
+	// Retry only accepts StatusFailed. The LLM call itself intentionally
+	// keeps the original ctx so a client disconnect still aborts the
+	// in-flight model request.
+	persistCtx := context.WithoutCancel(ctx)
 	rubric := s.rubrics["question"]
 	system, user := BuildQuestionPrompt(rubric, *mod, *step, sub.Content)
 	raw, err := s.llm.Complete(ctx, system, user)
 	if err != nil {
-		return s.subs.UpdateSubmission(ctx, id, StatusFailed, "LLM error: "+err.Error())
+		return s.subs.UpdateSubmission(persistCtx, id, StatusFailed, "LLM error: "+err.Error())
 	}
 	verdict, err := ParseVerdict(raw)
 	if err != nil {
-		return s.subs.UpdateSubmission(ctx, id, StatusFailed, "verdict parse error: "+err.Error())
+		return s.subs.UpdateSubmission(persistCtx, id, StatusFailed, "verdict parse error: "+err.Error())
 	}
-	if _, err := s.subs.InsertEvaluation(ctx, Evaluation{
+	if _, err := s.subs.InsertEvaluation(persistCtx, Evaluation{
 		SubmissionID: id, Model: s.llm.Model(), RubricVersion: rubric.Version,
 		Verdict: verdict, CreatedAt: s.now().UTC(),
 	}); err != nil {
 		return err
 	}
-	return s.subs.UpdateSubmission(ctx, id, StatusComplete, "")
+	return s.subs.UpdateSubmission(persistCtx, id, StatusComplete, "")
 }
 
 func (s *Service) RefForSubmission(ctx context.Context, id int64) (course.StepRef, error) {
