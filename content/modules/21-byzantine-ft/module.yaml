@@ -1,0 +1,5 @@
+title: "Lecture 21: Byzantine Fault Tolerance"
+kind: lecture
+order: 230
+links:
+  paper: "https://pdos.csail.mit.edu/6.824/schedule.html"

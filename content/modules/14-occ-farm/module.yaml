@@ -1,0 +1,5 @@
+title: "Lecture 14: Optimistic Concurrency Control — FaRM"
+kind: lecture
+order: 150
+links:
+  paper: "https://pdos.csail.mit.edu/6.824/schedule.html"

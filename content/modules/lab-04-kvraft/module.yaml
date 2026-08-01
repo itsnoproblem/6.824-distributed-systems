@@ -1,0 +1,5 @@
+title: "Lab 4: Fault-tolerant Key/Value Service"
+kind: lab
+order: 130
+links:
+  lab: "https://pdos.csail.mit.edu/6.824/labs/lab-kvraft.html"

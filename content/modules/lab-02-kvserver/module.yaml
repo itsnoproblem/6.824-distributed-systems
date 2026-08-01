@@ -1,0 +1,5 @@
+title: "Lab 2: Key/Value Server"
+kind: lab
+order: 45
+links:
+  lab: "https://pdos.csail.mit.edu/6.824/labs/lab-kvsrv.html"

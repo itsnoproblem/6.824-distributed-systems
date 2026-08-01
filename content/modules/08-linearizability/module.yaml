@@ -1,0 +1,5 @@
+title: "Lecture 8: Consistency & Linearizability"
+kind: lecture
+order: 80
+links:
+  paper: "https://pdos.csail.mit.edu/6.824/schedule.html"

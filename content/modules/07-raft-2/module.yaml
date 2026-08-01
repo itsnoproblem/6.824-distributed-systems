@@ -1,0 +1,5 @@
+title: "Lecture 7: Fault Tolerance — Raft (2)"
+kind: lecture
+order: 70
+links:
+  paper: "https://pdos.csail.mit.edu/6.824/schedule.html"

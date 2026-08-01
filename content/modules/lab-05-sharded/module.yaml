@@ -1,0 +1,5 @@
+title: "Lab 5: Sharded Key/Value Service"
+kind: lab
+order: 190
+links:
+  lab: "https://pdos.csail.mit.edu/6.824/labs/lab-shard.html"

@@ -1,0 +1,5 @@
+title: "Lecture 9: ZooKeeper"
+kind: lecture
+order: 90
+links:
+  paper: "https://pdos.csail.mit.edu/6.824/schedule.html"

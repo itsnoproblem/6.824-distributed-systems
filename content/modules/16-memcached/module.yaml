@@ -1,0 +1,5 @@
+title: "Lecture 16: Cache Consistency — Memcached at Facebook"
+kind: lecture
+order: 170
+links:
+  paper: "https://pdos.csail.mit.edu/6.824/schedule.html"

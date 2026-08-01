@@ -13,8 +13,9 @@ func TestRealContentParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Modules) < 2 {
-		t.Fatalf("expected at least 2 modules, got %d", len(c.Modules))
+	// 22 lectures + 5 labs + 1 project
+	if len(c.Modules) != 28 {
+		t.Fatalf("expected 28 modules, got %d", len(c.Modules))
 	}
 	if _, ok := c.Module("01-introduction"); !ok {
 		t.Error("missing module 01-introduction")
