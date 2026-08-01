@@ -1,0 +1,16 @@
+services:
+  tour:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-sonnet-4}
+    volumes:
+      - tour-data:/data
+      - ${LAB_REPO_DIR:?point LAB_REPO_DIR at your 6.824 lab repo clone}:/lab:ro
+
+volumes:
+  tour-data:
