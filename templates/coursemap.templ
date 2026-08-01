@@ -1,0 +1,30 @@
+package templates
+
+import "fmt"
+
+templ CourseMap(v CourseMapVM) {
+	<header class="topbar">
+		<h1>MIT 6.824 — Guided Tour</h1>
+		<span class="topbar-title"></span>
+		<span class="progress-label">{ fmt.Sprintf("%d/%d steps", v.Done, v.Total) }</span>
+	</header>
+	<main class="content">
+		<p><a href="/notes">All notes →</a></p>
+		for _, g := range v.Groups {
+			<section>
+				<h2>{ g.Label }</h2>
+				<ul class="module-list">
+					for _, m := range g.Modules {
+						<li>
+							<a href={ templ.SafeURL(m.FirstStepURL) }>{ m.Title }</a>
+							<span class="module-progress">
+								<progress max={ fmt.Sprint(m.Total) } value={ fmt.Sprint(m.Done) }></progress>
+								{ fmt.Sprintf("%d/%d", m.Done, m.Total) }
+							</span>
+						</li>
+					}
+				</ul>
+			</section>
+		}
+	</main>
+}

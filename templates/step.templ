@@ -1,0 +1,64 @@
+package templates
+
+import "fmt"
+
+templ StepPage(v StepVM) {
+	<header class="topbar">
+		<a href="/">⌂ Map</a>
+		<span class="topbar-title">{ v.ModuleTitle }</span>
+		<span class="progress-label">{ fmt.Sprintf("step %d of %d", v.Index, v.Total) }</span>
+		<button class="drawer-toggle" onclick="document.body.classList.toggle('drawer-open')">Notes</button>
+	</header>
+	<main class="content step">
+		<h2>{ v.Title }</h2>
+		if v.PaperURL != "" || v.LabURL != "" || v.VideoURL != "" {
+			<p class="module-links">
+				if v.PaperURL != "" {
+					<a href={ templ.SafeURL(v.PaperURL) } target="_blank">Paper</a>
+				}
+				if v.LabURL != "" {
+					<a href={ templ.SafeURL(v.LabURL) } target="_blank">Lab page</a>
+				}
+				if v.VideoURL != "" {
+					<a href={ templ.SafeURL(v.VideoURL) } target="_blank">Lecture</a>
+				}
+			</p>
+		}
+		@templ.Raw(v.BodyHTML)
+		if v.Type == "question" || v.Type == "submit" {
+			<div id="eval-section"
+				hx-get={ "/eval/section?module=" + v.ModuleSlug + "&step=" + v.StepSlug }
+				hx-trigger="load" hx-swap="innerHTML"></div>
+		}
+		<div class="step-actions">
+			@CompleteToggle(v.ModuleSlug, v.StepSlug, v.Completed)
+		</div>
+		<nav class="step-nav">
+			<span>
+				if v.PrevURL != "" {
+					<a href={ templ.SafeURL(v.PrevURL) }>← Previous</a>
+				}
+			</span>
+			<span>
+				if v.NextURL != "" {
+					<a href={ templ.SafeURL(v.NextURL) }>Next →</a>
+				}
+			</span>
+		</nav>
+	</main>
+	<aside id="notes-drawer"
+		hx-get={ "/notes/drawer?module=" + v.ModuleSlug + "&step=" + v.StepSlug }
+		hx-trigger="load" hx-swap="innerHTML"></aside>
+}
+
+templ CompleteToggle(moduleSlug, stepSlug string, completed bool) {
+	<form hx-post={ "/modules/" + moduleSlug + "/steps/" + stepSlug + "/complete" } hx-swap="outerHTML">
+		if completed {
+			<input type="hidden" name="done" value="false"/>
+			<button class="btn done">✓ Completed — click to undo</button>
+		} else {
+			<input type="hidden" name="done" value="true"/>
+			<button class="btn">Mark step complete</button>
+		}
+	</form>
+}
