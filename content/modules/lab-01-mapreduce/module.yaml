@@ -1,0 +1,5 @@
+title: "Lab 1: MapReduce"
+kind: lab
+order: 15
+links:
+  lab: "https://pdos.csail.mit.edu/6.824/labs/lab-mr.html"

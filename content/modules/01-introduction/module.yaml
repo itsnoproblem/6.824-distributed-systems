@@ -1,0 +1,6 @@
+title: "Lecture 1: Introduction & MapReduce"
+kind: lecture
+order: 10
+links:
+  paper: "https://pdos.csail.mit.edu/6.824/papers/mapreduce.pdf"
+  video: "https://pdos.csail.mit.edu/6.824/schedule.html"
