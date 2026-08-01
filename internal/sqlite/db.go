@@ -1,0 +1,63 @@
+// Package sqlite implements the app's repositories on a local SQLite file.
+package sqlite
+
+import (
+	"database/sql"
+	"embed"
+	"fmt"
+	"sort"
+
+	_ "modernc.org/sqlite"
+)
+
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+func Open(path string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite",
+		path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	if err != nil {
+		return nil, err
+	}
+	// SQLite allows one writer; a single conn avoids SQLITE_BUSY entirely.
+	db.SetMaxOpenConns(1)
+	return db, db.Ping()
+}
+
+func Migrate(db *sql.DB) error {
+	if _, err := db.Exec(
+		"CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)"); err != nil {
+		return err
+	}
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		var n int
+		if err := db.QueryRow(
+			"SELECT count(*) FROM schema_migrations WHERE version = ?", name).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		raw, err := migrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			return err
+		}
+		if _, err := db.Exec(string(raw)); err != nil {
+			return fmt.Errorf("migration %s: %w", name, err)
+		}
+		if _, err := db.Exec(
+			"INSERT INTO schema_migrations (version) VALUES (?)", name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
