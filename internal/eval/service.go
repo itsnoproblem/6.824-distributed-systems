@@ -27,7 +27,7 @@ type LLM interface {
 }
 
 // LabRepo abstracts the student's mounted lab repository (implemented by
-// FSLabRepo in the lab-evaluation task; nil until then).
+// FSLabRepo; may be nil in tests that don't exercise labs).
 type LabRepo interface {
 	Snapshot(workdir string, globs []string) (map[string]string, error)
 	RunTests(ctx context.Context, workdir string, cmd []string, timeout time.Duration) (string, error)
@@ -268,7 +268,12 @@ func (s *Service) RefForSubmission(ctx context.Context, id int64) (course.StepRe
 }
 
 // Retry re-evaluates a failed submission: synchronously for questions,
-// via the async pipeline for labs.
+// via the async pipeline for labs. Question retries require the LLM (their
+// only failure mode is an LLM/verdict error), so locked mode rejects them.
+// Lab retries proceed regardless of LLM presence: a lab's only possible
+// locked-mode failure is a runner error (timeout/exec), which re-running
+// the test runner alone can resolve; evaluateLab already handles a nil LLM
+// by completing with test output only.
 func (s *Service) Retry(ctx context.Context, id int64) error {
 	sub, err := s.subs.GetSubmission(ctx, id)
 	if err != nil {
@@ -277,11 +282,11 @@ func (s *Service) Retry(ctx context.Context, id int64) error {
 	if sub.Status != StatusFailed {
 		return fmt.Errorf("%w: submission %d is %s, not failed", api.ErrInvalid, id, sub.Status)
 	}
-	if s.llm == nil {
-		return fmt.Errorf("%w: evaluation mode is locked", api.ErrInvalid)
-	}
 	switch sub.Kind {
 	case KindQuestion:
+		if s.llm == nil {
+			return fmt.Errorf("%w: evaluation mode is locked", api.ErrInvalid)
+		}
 		return s.evaluateQuestion(ctx, id)
 	default:
 		s.runAsync(func() { s.evaluateLab(id) })

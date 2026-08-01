@@ -9,7 +9,7 @@ import (
 )
 
 // EvalService is the contract this feature's endpoints require; *Service
-// satisfies it. Later tasks extend it with lab submission and retry.
+// satisfies it, covering question and lab submission, retry, and step state.
 type EvalService interface {
 	StepState(ctx context.Context, ref course.StepRef) (StepEvalView, error)
 	SubmitAnswer(ctx context.Context, ref course.StepRef, answer string) error
