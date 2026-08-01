@@ -1,0 +1,26 @@
+# Skill Observation Log
+
+Observations captured during task-oriented work. Each entry identifies a
+potential improvement to a skill, rule, or workflow.
+
+**Status key:** OPEN = not yet actioned | ACTIONED = applied | DECLINED = not pursued
+
+---
+
+### Observation 1: Committed docs must be self-contained and name-free
+
+**Status:** ACTIONED
+**Date:** 2026-08-01
+**Session context:** Writing the course-tour design spec during project brainstorming
+**Target:** auto-memory (written: doc-hygiene-no-names-no-orphan-labels.md)
+
+**Issue:** The first version of the design spec included the user's personal
+name ("brainstorming session with…", audience row) and a conversation-scoped
+label ("Approach B") whose alternatives were never described in the doc
+itself. The user corrected both in one message.
+**Suggested improvement:** Before committing any doc, sweep for personal
+names and for labels/references that only made sense in the conversation
+that produced the doc; either describe choices self-containedly or summarize
+the rejected alternatives inline.
+**Principle:** Docs outlive the session that wrote them — a reader has the
+repo, not the chat.
