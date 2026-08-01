@@ -1,5 +1,5 @@
 * { box-sizing: border-box; }
-body { margin: 0; font: 16px/1.6 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #1a1a1a; }
+body { margin: 0; font: 16px/1.6 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #1a1a1a; background: #fff; }
 a { color: #007d9c; }
 .topbar { display: flex; align-items: center; gap: 1rem; padding: .6rem 1rem;
   background: #007d9c; color: #fff; position: sticky; top: 0; }
