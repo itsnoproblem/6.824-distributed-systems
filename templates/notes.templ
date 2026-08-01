@@ -1,0 +1,63 @@
+package templates
+
+import "fmt"
+
+templ NotesDrawer(v NotesDrawerVM) {
+	<div class="drawer-inner">
+		<h3>Notes</h3>
+		<form hx-post="/notes" hx-target="#notes-drawer" hx-swap="innerHTML">
+			<input type="hidden" name="module" value={ v.ModuleSlug }/>
+			<input type="hidden" name="step" value={ v.StepSlug }/>
+			<textarea name="body" rows="4" placeholder="Jot a note for this step…" required></textarea>
+			<button class="btn">Save note</button>
+		</form>
+		<ul class="note-list">
+			for _, n := range v.Notes {
+				@NoteItem(n)
+			}
+		</ul>
+	</div>
+}
+
+templ NoteItem(n NoteVM) {
+	<li class="note" id={ fmt.Sprintf("note-%d", n.ID) }>
+		<p class="note-body">{ n.Body }</p>
+		<span class="note-meta">{ n.CreatedAt }</span>
+		<button class="link" hx-get={ fmt.Sprintf("/notes/%d/edit", n.ID) }
+			hx-target={ fmt.Sprintf("#note-%d", n.ID) } hx-swap="outerHTML">edit</button>
+		<button class="link danger" hx-delete={ fmt.Sprintf("/notes/%d", n.ID) }
+			hx-target={ fmt.Sprintf("#note-%d", n.ID) } hx-swap="outerHTML">delete</button>
+	</li>
+}
+
+templ NoteEditForm(n NoteVM) {
+	<li class="note" id={ fmt.Sprintf("note-%d", n.ID) }>
+		<form hx-put={ fmt.Sprintf("/notes/%d", n.ID) }
+			hx-target={ fmt.Sprintf("#note-%d", n.ID) } hx-swap="outerHTML">
+			<textarea name="body" rows="4" required>{ n.Body }</textarea>
+			<button class="btn">Save</button>
+		</form>
+	</li>
+}
+
+templ NotesIndex(v NotesIndexVM) {
+	<header class="topbar">
+		<a href="/">⌂ Map</a>
+		<span class="topbar-title">All notes</span>
+	</header>
+	<main class="content">
+		if len(v.Groups) == 0 {
+			<p class="empty">No notes yet. Open any step and hit “Notes”.</p>
+		}
+		for _, g := range v.Groups {
+			<section>
+				<h2>{ g.ModuleTitle }</h2>
+				<ul class="note-list">
+					for _, n := range g.Notes {
+						@NoteItem(n)
+					}
+				</ul>
+			</section>
+		}
+	</main>
+}

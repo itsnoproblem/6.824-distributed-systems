@@ -9,6 +9,7 @@ import (
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/config"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/tour"
 	"github.com/itsnoproblem/mit-distributed-systems/static"
@@ -44,6 +45,7 @@ func main() {
 
 	mux := newMux()
 	tour.RegisterRoutes(mux, tour.NewService(courseRepo, sqlite.NewProgressRepo(db)))
+	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 
 	log.Printf("tour listening on :%s", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))

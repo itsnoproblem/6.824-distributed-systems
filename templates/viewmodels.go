@@ -30,3 +30,22 @@ type StepVM struct {
 }
 
 func StepURL(module, step string) string { return "/modules/" + module + "/steps/" + step }
+
+type NoteVM struct {
+	ID                   int64
+	ModuleSlug, StepSlug string
+	Body                 string
+	CreatedAt            string
+}
+
+type NotesDrawerVM struct {
+	ModuleSlug, StepSlug string
+	Notes                []NoteVM
+}
+
+type ModuleNotesVM struct {
+	ModuleTitle string
+	Notes       []NoteVM
+}
+
+type NotesIndexVM struct{ Groups []ModuleNotesVM }

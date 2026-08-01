@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/tour"
 )
@@ -44,6 +45,7 @@ func newApp(t *testing.T, o options) *app {
 	courseRepo := coursefs.NewRepo(crs)
 	mux := http.NewServeMux()
 	tour.RegisterRoutes(mux, tour.NewService(courseRepo, sqlite.NewProgressRepo(db)))
+	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return &app{TS: ts, DB: db}
