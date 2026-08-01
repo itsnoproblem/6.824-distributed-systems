@@ -47,6 +47,25 @@ func RegisterRoutes(mux *http.ServeMux, svc EvalService) {
 		resp, err := retry(r.Context(), id)
 		renderSection(w, r, resp, err)
 	})
+
+	submitLab := makeSubmitLabEndpoint(svc)
+	bySubmission := makeSectionBySubmissionEndpoint(svc)
+
+	mux.HandleFunc("POST /modules/{module}/steps/{step}/submit-lab", func(w http.ResponseWriter, r *http.Request) {
+		req := SubmitLabRequest{Module: r.PathValue("module"), Step: r.PathValue("step")}
+		resp, err := submitLab(r.Context(), req)
+		renderSection(w, r, resp, err)
+	})
+
+	mux.HandleFunc("GET /submissions/{id}/section", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			api.RenderError(w, r, api.ErrInvalid)
+			return
+		}
+		resp, err := bySubmission(r.Context(), id)
+		renderSection(w, r, resp, err)
+	})
 }
 
 func sectionVM(ref course.StepRef, v StepEvalView) templates.EvalSectionVM {

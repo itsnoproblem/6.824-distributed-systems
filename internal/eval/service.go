@@ -2,7 +2,9 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -162,6 +164,101 @@ func (s *Service) evaluateQuestion(ctx context.Context, id int64) error {
 	return s.subs.UpdateSubmission(persistCtx, id, StatusComplete, "")
 }
 
+// SubmitLab snapshots the lab code, records the submission, marks the step
+// complete, and schedules the async run-tests-then-evaluate pipeline.
+func (s *Service) SubmitLab(ctx context.Context, ref course.StepRef) error {
+	_, step, ok := s.course.Course().Step(ref)
+	if !ok || step.Type != course.StepSubmit || step.Eval == nil {
+		return fmt.Errorf("%w: submit step %s", api.ErrNotFound, ref)
+	}
+	if s.lab == nil {
+		return fmt.Errorf("%w: no lab repository configured (set LAB_REPO_DIR)", api.ErrInvalid)
+	}
+	files, err := s.lab.Snapshot(step.Eval.Workdir, step.Eval.Globs)
+	if err != nil {
+		return fmt.Errorf("%w: snapshot: %v", api.ErrInvalid, err)
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("%w: no files matched %v under %s",
+			api.ErrInvalid, step.Eval.Globs, step.Eval.Workdir)
+	}
+	content, err := json.Marshal(files)
+	if err != nil {
+		return err
+	}
+	id, err := s.subs.InsertSubmission(ctx, Submission{
+		Ref: ref, Kind: KindLab, Content: string(content),
+		Status: StatusPending, CreatedAt: s.now().UTC(),
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.progress.SetComplete(ctx, ref, true); err != nil {
+		return err
+	}
+	s.runAsync(func() { s.evaluateLab(id) })
+	return nil
+}
+
+// evaluateLab runs in the background with its own context; every failure
+// lands on the submission row, never in a log the user can't see.
+func (s *Service) evaluateLab(id int64) {
+	ctx := context.Background()
+	sub, err := s.subs.GetSubmission(ctx, id)
+	if err != nil {
+		return
+	}
+	mod, step, ok := s.course.Course().Step(sub.Ref)
+	if !ok || step.Eval == nil {
+		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, "step no longer exists in content")
+		return
+	}
+	_ = s.subs.UpdateSubmission(ctx, id, StatusRunning, "")
+	out, err := s.lab.RunTests(ctx, step.Eval.Workdir, step.Eval.TestCmd, step.Eval.Timeout)
+	if err != nil {
+		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\nRUNNER ERROR: "+err.Error())
+		return
+	}
+	if s.llm == nil {
+		_ = s.subs.UpdateSubmission(ctx, id, StatusComplete, out)
+		return
+	}
+	var files map[string]string
+	if err := json.Unmarshal([]byte(sub.Content), &files); err != nil {
+		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\nSNAPSHOT DECODE ERROR: "+err.Error())
+		return
+	}
+	rubric := s.rubrics["lab"]
+	system, user := BuildLabPrompt(rubric, s.loadGuidance(sub.Ref.Module), *mod, *step, files, out)
+	raw, err := s.llm.Complete(ctx, system, user)
+	if err != nil {
+		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\nLLM ERROR: "+err.Error())
+		return
+	}
+	verdict, err := ParseVerdict(raw)
+	if err != nil {
+		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\nVERDICT PARSE ERROR: "+err.Error())
+		return
+	}
+	if _, err := s.subs.InsertEvaluation(ctx, Evaluation{
+		SubmissionID: id, Model: s.llm.Model(), RubricVersion: rubric.Version,
+		Verdict: verdict, CreatedAt: s.now().UTC(),
+	}); err != nil {
+		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\nSTORE ERROR: "+err.Error())
+		return
+	}
+	_ = s.subs.UpdateSubmission(ctx, id, StatusComplete, out)
+}
+
+// loadGuidance returns per-module evaluator guidance, or "" when none is authored.
+func (s *Service) loadGuidance(moduleSlug string) string {
+	raw, err := os.ReadFile(filepath.Join(s.guidanceDir, moduleSlug+".md"))
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 func (s *Service) RefForSubmission(ctx context.Context, id int64) (course.StepRef, error) {
 	sub, err := s.subs.GetSubmission(ctx, id)
 	if err != nil {
@@ -170,8 +267,8 @@ func (s *Service) RefForSubmission(ctx context.Context, id int64) (course.StepRe
 	return sub.Ref, nil
 }
 
-// Retry re-evaluates a failed submission. (Lab retries arrive with the lab
-// pipeline task; until then only questions are retryable.)
+// Retry re-evaluates a failed submission: synchronously for questions,
+// via the async pipeline for labs.
 func (s *Service) Retry(ctx context.Context, id int64) error {
 	sub, err := s.subs.GetSubmission(ctx, id)
 	if err != nil {
@@ -183,10 +280,13 @@ func (s *Service) Retry(ctx context.Context, id int64) error {
 	if s.llm == nil {
 		return fmt.Errorf("%w: evaluation mode is locked", api.ErrInvalid)
 	}
-	if sub.Kind != KindQuestion {
-		return fmt.Errorf("%w: lab retry requires the lab pipeline", api.ErrInvalid)
+	switch sub.Kind {
+	case KindQuestion:
+		return s.evaluateQuestion(ctx, id)
+	default:
+		s.runAsync(func() { s.evaluateLab(id) })
+		return nil
 	}
-	return s.evaluateQuestion(ctx, id)
 }
 
 func (s *Service) StepState(ctx context.Context, ref course.StepRef) (StepEvalView, error) {

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fetch(t *testing.T, url string) string {
@@ -103,5 +104,58 @@ func TestLLMFailureIsRecordedAndRetryable(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.Contains(string(b), "Evaluation failed") {
 		t.Fatalf("retry: %d %q", resp.StatusCode, string(b))
+	}
+}
+
+type stubLab struct {
+	files map[string]string
+	out   string
+	err   error
+}
+
+func (s stubLab) Snapshot(string, []string) (map[string]string, error) { return s.files, nil }
+func (s stubLab) RunTests(context.Context, string, []string, time.Duration) (string, error) {
+	return s.out, s.err
+}
+
+func TestLabSubmitEvaluated(t *testing.T) {
+	app := newApp(t, options{
+		LLM: fakeLLM{resp: goodVerdict},
+		Lab: stubLab{files: map[string]string{"src/x/x.go": "package x"}, out: "PASS\nok"},
+	})
+	// the e2e harness uses a synchronous runner, so the pipeline finishes before the response
+	resp, err := http.Post(app.TS.URL+"/modules/02-test-lab/steps/01-submit/submit-lab", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	body := string(b)
+	for _, want := range []string{"Correctness", "Good answer.", "Test output"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lab report missing %q: %q", want, body)
+		}
+	}
+	// submitting auto-completed the step
+	if !strings.Contains(fetch(t, app.TS.URL+"/modules/02-test-lab/steps/01-submit"), "Completed") {
+		t.Fatal("submit step not auto-completed")
+	}
+}
+
+func TestLabRunnerFailure(t *testing.T) {
+	app := newApp(t, options{
+		LLM: fakeLLM{resp: goodVerdict},
+		Lab: stubLab{files: map[string]string{"a.go": "package a"}, out: "partial output",
+			err: errors.New("test run timed out after 1m0s")},
+	})
+	resp, err := http.Post(app.TS.URL+"/modules/02-test-lab/steps/01-submit/submit-lab", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	body := string(b)
+	if !strings.Contains(body, "Evaluation failed") || !strings.Contains(body, "RUNNER ERROR") {
+		t.Fatalf("failure UI: %q", body)
 	}
 }

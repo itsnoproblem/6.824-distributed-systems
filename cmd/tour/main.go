@@ -55,7 +55,7 @@ func main() {
 		llm = openrouter.New(cfg.OpenRouterKey, cfg.OpenRouterModel)
 	}
 	evalSvc, err := eval.NewService(courseRepo, sqlite.NewSubmissionRepo(db),
-		progressRepo, llm, nil, cfg.ContentDir)
+		progressRepo, llm, eval.FSLabRepo{Dir: cfg.LabRepoDir}, cfg.ContentDir)
 	if err != nil {
 		log.Fatalf("eval service: %v", err)
 	}

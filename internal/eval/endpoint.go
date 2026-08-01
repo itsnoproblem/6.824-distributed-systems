@@ -13,6 +13,7 @@ import (
 type EvalService interface {
 	StepState(ctx context.Context, ref course.StepRef) (StepEvalView, error)
 	SubmitAnswer(ctx context.Context, ref course.StepRef, answer string) error
+	SubmitLab(ctx context.Context, ref course.StepRef) error
 	Retry(ctx context.Context, id int64) error
 	RefForSubmission(ctx context.Context, id int64) (course.StepRef, error)
 }
@@ -56,6 +57,40 @@ func makeAnswerEndpoint(svc EvalService) api.Endpoint {
 		}
 		ref := course.StepRef{Module: req.Module, Step: req.Step}
 		if err := svc.SubmitAnswer(ctx, ref, req.Answer); err != nil {
+			return nil, err
+		}
+		view, err := svc.StepState(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		return SectionResponse{Ref: ref, View: view}, nil
+	}
+}
+
+type SubmitLabRequest struct{ Module, Step string }
+
+func makeSubmitLabEndpoint(svc EvalService) api.Endpoint {
+	return func(ctx context.Context, request any) (any, error) {
+		req := request.(SubmitLabRequest)
+		if err := (SectionRequest{Module: req.Module, Step: req.Step}).Validate(); err != nil {
+			return nil, err
+		}
+		ref := course.StepRef{Module: req.Module, Step: req.Step}
+		if err := svc.SubmitLab(ctx, ref); err != nil {
+			return nil, err
+		}
+		view, err := svc.StepState(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		return SectionResponse{Ref: ref, View: view}, nil
+	}
+}
+
+func makeSectionBySubmissionEndpoint(svc EvalService) api.Endpoint {
+	return func(ctx context.Context, request any) (any, error) {
+		ref, err := svc.RefForSubmission(ctx, request.(int64))
+		if err != nil {
 			return nil, err
 		}
 		view, err := svc.StepState(ctx, ref)

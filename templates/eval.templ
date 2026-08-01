@@ -77,10 +77,32 @@ templ Report(r ReportVM) {
 	</div>
 }
 
-// LabSection is a stub until the lab-evaluation pipeline task replaces it.
 templ LabSection(v EvalSectionVM) {
 	<div class="eval">
 		<h3>Submit this lab part</h3>
-		<p class="locked">Lab submission arrives with the evaluation pipeline.</p>
+		if !v.Enabled {
+			<p class="locked">
+				Evaluation mode is locked — set OPENROUTER_API_KEY for LLM review.
+				Submitting still snapshots your code and runs the lab tests.
+			</p>
+		}
+		if v.Status == "pending" || v.Status == "running" {
+			<div hx-get={ fmt.Sprintf("/submissions/%d/section", v.SubmissionID) }
+				hx-trigger="every 3s" hx-target="#eval-section" hx-swap="innerHTML">
+				<p>⏳ Evaluation running — lab tests can take several minutes.</p>
+			</div>
+		} else {
+			<form hx-post={ "/modules/" + v.ModuleSlug + "/steps/" + v.StepSlug + "/submit-lab" }
+				hx-target="#eval-section" hx-swap="innerHTML">
+				<button class="btn">Snapshot code & run evaluation</button>
+			</form>
+			@SubmissionResult(v)
+			if v.Status == "complete" && v.TestOutput != "" {
+				<details>
+					<summary>Test output</summary>
+					<pre class="test-output">{ v.TestOutput }</pre>
+				</details>
+			}
+		}
 	</div>
 }
