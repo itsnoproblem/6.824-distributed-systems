@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
+	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
 )
 
 func notesRepo(t *testing.T) *sqlite.NotesRepo {
@@ -58,5 +60,21 @@ func TestNotesCRUD(t *testing.T) {
 	}
 	if all, _ = repo.All(ctx); len(all) != 1 {
 		t.Fatalf("after delete: %d", len(all))
+	}
+}
+
+func TestGetMissingReturnsNotFound(t *testing.T) {
+	repo := notesRepo(t)
+	ctx := context.Background()
+	if _, err := repo.Get(ctx, 99999); !errors.Is(err, api.ErrNotFound) {
+		t.Fatalf("get missing err = %v, want api.ErrNotFound", err)
+	}
+}
+
+func TestDeleteMissingIsNoop(t *testing.T) {
+	repo := notesRepo(t)
+	ctx := context.Background()
+	if err := repo.Delete(ctx, 99999); err != nil {
+		t.Fatalf("delete missing = %v, want nil", err)
 	}
 }

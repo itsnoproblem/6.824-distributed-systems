@@ -3,10 +3,13 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
+	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
 )
 
 type NotesRepo struct{ db *sql.DB }
@@ -45,14 +48,23 @@ func (r *NotesRepo) Update(ctx context.Context, id int64, body string, updatedAt
 	return err
 }
 
+// Delete is idempotent: removing an already-deleted note is a no-op, so a
+// double-click on the drawer's delete button never surfaces an error.
 func (r *NotesRepo) Delete(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM notes WHERE id = ?", id)
 	return err
 }
 
 func (r *NotesRepo) Get(ctx context.Context, id int64) (notes.Note, error) {
-	return scanNote(r.db.QueryRowContext(ctx,
+	n, err := scanNote(r.db.QueryRowContext(ctx,
 		"SELECT "+noteCols+" FROM notes WHERE id = ?", id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return notes.Note{}, fmt.Errorf("%w: note %d", api.ErrNotFound, id)
+		}
+		return notes.Note{}, err
+	}
+	return n, nil
 }
 
 func (r *NotesRepo) ForStep(ctx context.Context, ref course.StepRef) ([]notes.Note, error) {

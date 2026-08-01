@@ -49,4 +49,14 @@ func TestNotesFlow(t *testing.T) {
 	if resp.StatusCode != 400 {
 		t.Fatalf("empty body = %d, want 400", resp.StatusCode)
 	}
+
+	// editing a nonexistent note surfaces as 404, not 500
+	resp, err = http.Get(app.TS.URL + "/notes/99999/edit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 404 {
+		t.Fatalf("missing note edit = %d, want 404", resp.StatusCode)
+	}
 }

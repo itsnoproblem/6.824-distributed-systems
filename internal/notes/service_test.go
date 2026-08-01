@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
@@ -24,7 +25,7 @@ func fixtureCourse() *course.Course {
 	}}
 }
 
-func newSvc(t *testing.T) *notes.Service {
+func newSvcAndRepo(t *testing.T) (*notes.Service, *sqlite.NotesRepo) {
 	t.Helper()
 	db, err := sqlite.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -34,7 +35,14 @@ func newSvc(t *testing.T) *notes.Service {
 	if err := sqlite.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	return notes.NewService(coursefs.NewRepo(fixtureCourse()), sqlite.NewNotesRepo(db))
+	repo := sqlite.NewNotesRepo(db)
+	return notes.NewService(coursefs.NewRepo(fixtureCourse()), repo), repo
+}
+
+func newSvc(t *testing.T) *notes.Service {
+	t.Helper()
+	svc, _ := newSvcAndRepo(t)
+	return svc
 }
 
 func TestAddAndGroup(t *testing.T) {
@@ -53,6 +61,42 @@ func TestAddAndGroup(t *testing.T) {
 	// grouped in course order, not insertion order
 	if len(groups) != 2 || groups[0].ModuleTitle != "Module One" || groups[1].ModuleTitle != "Module Two" {
 		t.Fatalf("groups: %+v", groups)
+	}
+}
+
+func TestGroupedByModuleAppendsOrphans(t *testing.T) {
+	svc, repo := newSvcAndRepo(t)
+	ctx := context.Background()
+	if _, err := svc.Add(ctx, course.StepRef{Module: "m2", Step: "s1"}, "lab note"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Add(ctx, course.StepRef{Module: "m1", Step: "s1"}, "lecture note"); err != nil {
+		t.Fatal(err)
+	}
+	// insert directly via the repo for a module slug the fixture course
+	// doesn't know about, bypassing Add's course-step validation.
+	now := time.Now().UTC()
+	orphanRef := course.StepRef{Module: "orphan-module", Step: "s1"}
+	if _, err := repo.Insert(ctx, notes.Note{Ref: orphanRef, Body: "orphan note", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := svc.GroupedByModule(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 3 {
+		t.Fatalf("groups: %+v", groups)
+	}
+	if groups[0].ModuleTitle != "Module One" || groups[1].ModuleTitle != "Module Two" {
+		t.Fatalf("course-order groups out of place: %+v", groups)
+	}
+	last := groups[2]
+	if last.ModuleSlug != "orphan-module" || last.ModuleTitle != "orphan-module" {
+		t.Fatalf("orphan group: %+v", last)
+	}
+	if len(last.Notes) != 1 || last.Notes[0].Body != "orphan note" {
+		t.Fatalf("orphan group notes: %+v", last.Notes)
 	}
 }
 

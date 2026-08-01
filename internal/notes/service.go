@@ -5,6 +5,7 @@ package notes
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -97,8 +98,13 @@ func (s *Service) GroupedByModule(ctx context.Context) ([]ModuleNotes, error) {
 			delete(byModule, m.Slug)
 		}
 	}
-	for slug, ns := range byModule {
-		out = append(out, ModuleNotes{ModuleSlug: slug, ModuleTitle: slug, Notes: ns})
+	orphanSlugs := make([]string, 0, len(byModule))
+	for slug := range byModule {
+		orphanSlugs = append(orphanSlugs, slug)
+	}
+	sort.Strings(orphanSlugs)
+	for _, slug := range orphanSlugs {
+		out = append(out, ModuleNotes{ModuleSlug: slug, ModuleTitle: slug, Notes: byModule[slug]})
 	}
 	return out, nil
 }
