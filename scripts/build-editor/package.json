@@ -1,0 +1,11 @@
+{
+  "name": "build-editor",
+  "private": true,
+  "description": "One-shot build of the vendored CodeMirror bundle. Artifact is committed at static/codemirror/codemirror.js; the normal app build never needs node.",
+  "dependencies": {
+    "@codemirror/lang-go": "^6.0.1",
+    "@codemirror/lint": "^6.8.4",
+    "codemirror": "^6.0.1",
+    "esbuild": "^0.24.0"
+  }
+}

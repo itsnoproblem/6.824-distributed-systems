@@ -50,6 +50,14 @@ func RegisterRoutes(mux *http.ServeMux, svc TourService) {
 	})
 }
 
+// RegisterAttribution serves the pre-rendered attribution page.
+func RegisterAttribution(mux *http.ServeMux, bodyHTML string) {
+	mux.HandleFunc("GET /attribution", func(w http.ResponseWriter, r *http.Request) {
+		api.RenderHTML(w, r, http.StatusOK,
+			templates.Document("Attribution", templates.SimplePage("Attribution", bodyHTML)))
+	})
+}
+
 func courseMapVM(v CourseMapView) templates.CourseMapVM {
 	out := templates.CourseMapVM{Done: v.Done, Total: v.Total}
 	for _, g := range v.Groups {
@@ -88,6 +96,8 @@ func stepVM(v StepView) templates.StepVM {
 		Completed: v.Completed, Index: v.Index, Total: v.Total,
 		PaperURL: v.Module.Links.Paper, LabURL: v.Module.Links.Lab, VideoURL: v.Module.Links.Video,
 	}
+	vm.VideoWatchURL = v.Step.Video
+	vm.VideoEmbedURL = templates.YouTubeEmbedURL(v.Step.Video)
 	if v.Prev != nil {
 		vm.PrevURL = templates.StepURL(v.Prev.Module, v.Prev.Step)
 	}

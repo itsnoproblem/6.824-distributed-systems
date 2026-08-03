@@ -11,6 +11,7 @@ import (
 	"github.com/itsnoproblem/mit-distributed-systems/internal/config"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/eval"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/exercise"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/openrouter"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
@@ -51,11 +52,19 @@ func main() {
 	tour.RegisterRoutes(mux, tour.NewService(courseRepo, progressRepo))
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 
+	attributionHTML, err := coursefs.RenderMarkdownFile(filepath.Join(cfg.ContentDir, "ATTRIBUTION.md"))
+	if err != nil {
+		log.Fatalf("attribution page: %v", err)
+	}
+	tour.RegisterAttribution(mux, attributionHTML)
+
+	subsRepo := sqlite.NewSubmissionRepo(db)
+
 	var llm eval.LLM
 	if cfg.OpenRouterKey != "" {
 		llm = openrouter.New(cfg.OpenRouterKey, cfg.OpenRouterModel)
 	}
-	evalSvc, err := eval.NewService(courseRepo, sqlite.NewSubmissionRepo(db),
+	evalSvc, err := eval.NewService(courseRepo, subsRepo,
 		progressRepo, llm, eval.FSLabRepo{Dir: cfg.LabRepoDir}, cfg.ContentDir)
 	if err != nil {
 		log.Fatalf("eval service: %v", err)
@@ -67,6 +76,13 @@ func main() {
 	}
 	eval.RegisterRoutes(mux, evalSvc)
 	log.Printf("evaluation mode enabled: %v", evalSvc.Enabled())
+
+	exerciseSvc, err := exercise.NewService(courseRepo, sqlite.NewDraftsRepo(db),
+		subsRepo, progressRepo, exercise.Workspace{}, llm, cfg.ContentDir)
+	if err != nil {
+		log.Fatalf("exercise service: %v", err)
+	}
+	exercise.RegisterRoutes(mux, exerciseSvc)
 
 	log.Printf("tour listening on :%s", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))

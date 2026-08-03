@@ -13,6 +13,7 @@ import (
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/eval"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/exercise"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/tour"
@@ -47,12 +48,20 @@ func newApp(t *testing.T, o options) *app {
 		t.Fatal(err)
 	}
 	courseRepo := coursefs.NewRepo(crs)
+	progressRepo := sqlite.NewProgressRepo(db)
+	subsRepo := sqlite.NewSubmissionRepo(db)
 	mux := http.NewServeMux()
-	tour.RegisterRoutes(mux, tour.NewService(courseRepo, sqlite.NewProgressRepo(db)))
+	tour.RegisterRoutes(mux, tour.NewService(courseRepo, progressRepo))
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 
-	evalSvc, err := eval.NewService(courseRepo, sqlite.NewSubmissionRepo(db),
-		sqlite.NewProgressRepo(db), o.LLM, o.Lab, o.ContentDir,
+	attributionHTML, err := coursefs.RenderMarkdownFile(filepath.Join(o.ContentDir, "ATTRIBUTION.md"))
+	if err != nil {
+		t.Fatalf("attribution page: %v", err)
+	}
+	tour.RegisterAttribution(mux, attributionHTML)
+
+	evalSvc, err := eval.NewService(courseRepo, subsRepo,
+		progressRepo, o.LLM, o.Lab, o.ContentDir,
 		eval.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state
 	if err != nil {
 		t.Fatalf("eval service: %v", err)
@@ -61,6 +70,14 @@ func newApp(t *testing.T, o options) *app {
 		t.Fatalf("recover interrupted submissions: %v", err)
 	}
 	eval.RegisterRoutes(mux, evalSvc)
+
+	exerciseSvc, err := exercise.NewService(courseRepo, sqlite.NewDraftsRepo(db),
+		subsRepo, progressRepo, exercise.Workspace{}, o.LLM, o.ContentDir,
+		exercise.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state
+	if err != nil {
+		t.Fatalf("exercise service: %v", err)
+	}
+	exercise.RegisterRoutes(mux, exerciseSvc)
 
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)

@@ -15,12 +15,22 @@ type SubmissionRepo struct{ db *sql.DB }
 
 func NewSubmissionRepo(db *sql.DB) *SubmissionRepo { return &SubmissionRepo{db} }
 
+func passedVal(p *bool) any {
+	if p == nil {
+		return nil
+	}
+	if *p {
+		return 1
+	}
+	return 0
+}
+
 func (r *SubmissionRepo) InsertSubmission(ctx context.Context, s eval.Submission) (int64, error) {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO submissions (module_slug, step_slug, kind, content, test_output, status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO submissions (module_slug, step_slug, kind, content, test_output, status, passed, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.Ref.Module, s.Ref.Step, string(s.Kind), s.Content, s.TestOutput, string(s.Status),
-		s.CreatedAt.UTC().Format(time.RFC3339))
+		passedVal(s.Passed), s.CreatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
 	}
@@ -31,6 +41,15 @@ func (r *SubmissionRepo) UpdateSubmission(ctx context.Context, id int64, status 
 	_, err := r.db.ExecContext(ctx,
 		"UPDATE submissions SET status = ?, test_output = ? WHERE id = ?",
 		string(status), testOutput, id)
+	return err
+}
+
+func (r *SubmissionRepo) SetPassed(ctx context.Context, id int64, passed bool) error {
+	v := 0
+	if passed {
+		v = 1
+	}
+	_, err := r.db.ExecContext(ctx, "UPDATE submissions SET passed = ? WHERE id = ?", v, id)
 	return err
 }
 
@@ -46,16 +65,21 @@ func (r *SubmissionRepo) FailInterrupted(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
-const subCols = "id, module_slug, step_slug, kind, content, test_output, status, created_at"
+const subCols = "id, module_slug, step_slug, kind, content, test_output, status, passed, created_at"
 
 func scanSubmission(row interface{ Scan(...any) error }) (eval.Submission, error) {
 	var s eval.Submission
 	var kind, status, created string
+	var passed sql.NullInt64
 	if err := row.Scan(&s.ID, &s.Ref.Module, &s.Ref.Step, &kind, &s.Content,
-		&s.TestOutput, &status, &created); err != nil {
+		&s.TestOutput, &status, &passed, &created); err != nil {
 		return eval.Submission{}, err
 	}
 	s.Kind, s.Status = eval.Kind(kind), eval.Status(status)
+	if passed.Valid {
+		v := passed.Int64 != 0
+		s.Passed = &v
+	}
 	s.CreatedAt, _ = time.Parse(time.RFC3339, created)
 	return s, nil
 }

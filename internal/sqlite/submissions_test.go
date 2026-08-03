@@ -134,3 +134,109 @@ func TestEvaluationRoundTrip(t *testing.T) {
 		t.Fatalf("eval: %v %+v", err, e)
 	}
 }
+
+// TestMigration002PreservesData simulates a v1 database: apply only 001,
+// insert a lab submission, then run the full Migrate and verify the row
+// survived and the new kind + passed flag work.
+func TestMigration002PreservesData(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := sqlite.MigrateUpTo(db, "001_init.sql"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO submissions
+		(module_slug, step_slug, kind, content, test_output, status, created_at)
+		VALUES ('m', 's', 'lab', 'code', 'out', 'complete', '2026-08-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlite.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := sqlite.NewSubmissionRepo(db)
+	ctx := context.Background()
+	old, err := repo.GetSubmission(ctx, 1)
+	if err != nil || old.Content != "code" || old.Status != eval.StatusComplete || old.Passed != nil {
+		t.Fatalf("v1 row mangled: %+v err=%v", old, err)
+	}
+	id, err := repo.InsertSubmission(ctx, eval.Submission{
+		Ref: course.StepRef{Module: "m", Step: "x"}, Kind: eval.KindExercise,
+		Content: "{}", Status: eval.StatusPending, CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("exercise kind rejected: %v", err)
+	}
+	if err := repo.SetPassed(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.GetSubmission(ctx, id)
+	if got.Passed == nil || !*got.Passed {
+		t.Fatalf("passed not persisted: %+v", got)
+	}
+}
+
+// TestMigration002PreservesEvaluations reproduces a v1 database that has
+// already graded a submission: an evaluations row exists whose submission_id
+// foreign key references the submissions row. Migration 002 recreates
+// submissions via create-copy-DROP-rename, and DROP TABLE on a row still
+// referenced by a foreign key fails under FK enforcement (which Open() turns
+// on) unless the migration runner disables/rechecks foreign_keys around the
+// migration per SQLite's documented procedure. This must not error, must
+// preserve both rows, must allow the new 'exercise' kind, and FK enforcement
+// must still be active afterward.
+func TestMigration002PreservesEvaluations(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := sqlite.MigrateUpTo(db, "001_init.sql"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO submissions
+		(module_slug, step_slug, kind, content, test_output, status, created_at)
+		VALUES ('m', 's', 'lab', 'code', 'out', 'complete', '2026-08-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO evaluations
+		(submission_id, model, rubric_version, verdict_json, created_at)
+		VALUES (1, 'm/x', '1', '{}', '2026-08-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sqlite.Migrate(db); err != nil {
+		t.Fatalf("migrate with existing evaluations row: %v", err)
+	}
+
+	repo := sqlite.NewSubmissionRepo(db)
+	ctx := context.Background()
+
+	old, err := repo.GetSubmission(ctx, 1)
+	if err != nil || old.Content != "code" || old.Status != eval.StatusComplete {
+		t.Fatalf("v1 submission row mangled: %+v err=%v", old, err)
+	}
+	ev, err := repo.EvaluationForSubmission(ctx, 1)
+	if err != nil || ev == nil || ev.Model != "m/x" {
+		t.Fatalf("evaluation row lost across migration: %+v err=%v", ev, err)
+	}
+
+	id, err := repo.InsertSubmission(ctx, eval.Submission{
+		Ref: course.StepRef{Module: "m", Step: "x"}, Kind: eval.KindExercise,
+		Content: "{}", Status: eval.StatusPending, CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("exercise kind rejected: %v", err)
+	}
+	if err := repo.SetPassed(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Foreign key enforcement must still be active after the migration.
+	if _, err := db.Exec(`INSERT INTO evaluations
+		(submission_id, model, rubric_version, verdict_json, created_at)
+		VALUES (99999, 'm/x', '1', '{}', '2026-08-01T00:00:00Z')`); err == nil {
+		t.Fatal("expected FK violation inserting evaluation for nonexistent submission")
+	}
+}

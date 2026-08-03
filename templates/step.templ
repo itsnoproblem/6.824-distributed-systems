@@ -24,10 +24,23 @@ templ StepPage(v StepVM) {
 				}
 			</p>
 		}
+		if v.VideoEmbedURL != "" {
+			<div class="video">
+				<iframe src={ templ.SafeURL(v.VideoEmbedURL) } title="Lecture video" allowfullscreen></iframe>
+			</div>
+			<p class="video-fallback">
+				<a href={ templ.SafeURL(v.VideoWatchURL) } target="_blank">Watch on YouTube</a>
+			</p>
+		}
 		@templ.Raw(v.BodyHTML)
 		if v.Type == "question" || v.Type == "submit" {
 			<div id="eval-section"
 				hx-get={ "/eval/section?module=" + v.ModuleSlug + "&step=" + v.StepSlug }
+				hx-trigger="load" hx-swap="innerHTML"></div>
+		}
+		if v.Type == "code" {
+			<div id="exercise-section"
+				hx-get={ "/exercises/" + v.ModuleSlug + "/" + v.StepSlug }
 				hx-trigger="load" hx-swap="innerHTML"></div>
 		}
 		<div class="step-actions">
