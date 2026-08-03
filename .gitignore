@@ -1,3 +1,4 @@
 /bin/
 /data/
 /docker/.env
+scripts/build-editor/node_modules/
