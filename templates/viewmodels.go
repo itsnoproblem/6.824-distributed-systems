@@ -92,6 +92,7 @@ type ExerciseVM struct {
 	Mode, ModeLabel      string // "fix"/"create", "Fix the bug"/"Build it"
 	Attribution          string
 	ConfigJSON           string
+	Files                []ExerciseFileVM
 	Status               string
 	Passed               bool
 	Output               string

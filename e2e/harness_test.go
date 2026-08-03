@@ -13,6 +13,7 @@ import (
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/eval"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/exercise"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/notes"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/tour"
@@ -47,12 +48,14 @@ func newApp(t *testing.T, o options) *app {
 		t.Fatal(err)
 	}
 	courseRepo := coursefs.NewRepo(crs)
+	progressRepo := sqlite.NewProgressRepo(db)
+	subsRepo := sqlite.NewSubmissionRepo(db)
 	mux := http.NewServeMux()
-	tour.RegisterRoutes(mux, tour.NewService(courseRepo, sqlite.NewProgressRepo(db)))
+	tour.RegisterRoutes(mux, tour.NewService(courseRepo, progressRepo))
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 
-	evalSvc, err := eval.NewService(courseRepo, sqlite.NewSubmissionRepo(db),
-		sqlite.NewProgressRepo(db), o.LLM, o.Lab, o.ContentDir,
+	evalSvc, err := eval.NewService(courseRepo, subsRepo,
+		progressRepo, o.LLM, o.Lab, o.ContentDir,
 		eval.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state
 	if err != nil {
 		t.Fatalf("eval service: %v", err)
@@ -61,6 +64,10 @@ func newApp(t *testing.T, o options) *app {
 		t.Fatalf("recover interrupted submissions: %v", err)
 	}
 	eval.RegisterRoutes(mux, evalSvc)
+
+	exercise.RegisterRoutes(mux, exercise.NewService(courseRepo, sqlite.NewDraftsRepo(db),
+		subsRepo, progressRepo, exercise.Workspace{},
+		exercise.WithRunAsync(func(f func()) { f() }))) // synchronous: tests see final state
 
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)

@@ -88,6 +88,8 @@ func stepVM(v StepView) templates.StepVM {
 		Completed: v.Completed, Index: v.Index, Total: v.Total,
 		PaperURL: v.Module.Links.Paper, LabURL: v.Module.Links.Lab, VideoURL: v.Module.Links.Video,
 	}
+	vm.VideoWatchURL = v.Step.Video
+	vm.VideoEmbedURL = templates.YouTubeEmbedURL(v.Step.Video)
 	if v.Prev != nil {
 		vm.PrevURL = templates.StepURL(v.Prev.Module, v.Prev.Step)
 	}
