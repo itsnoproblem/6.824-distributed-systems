@@ -77,6 +77,12 @@ func TestLoadErrors(t *testing.T) {
 			map[string]string{"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: guess\n  editable: [\"a.go\"]\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb"}, "mode"},
 		{"code no editable", "title: X\nkind: lecture\norder: 1",
 			map[string]string{"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: []\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb"}, "editable"},
+		{"code overlap editable readonly", "title: X\nkind: lecture\norder: 1",
+			map[string]string{"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: [\"a.go\"]\n  readonly: [\"a.go\"]\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb"}, "both editable and readonly"},
+		{"code empty run", "title: X\nkind: lecture\norder: 1",
+			map[string]string{"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: [\"a.go\"]\n  run: []\n  timeout: 1m\n---\nb"}, "run"},
+		{"code bad timeout", "title: X\nkind: lecture\norder: 1",
+			map[string]string{"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: [\"a.go\"]\n  run: [\"go\", \"test\"]\n  timeout: notaduration\n---\nb"}, "timeout"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,6 +126,70 @@ func TestCodeStepMissingScaffoldFile(t *testing.T) {
 	})
 	if _, err := coursefs.Load(root); err == nil || !strings.Contains(err.Error(), "gone.go") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCodeStepUnlistedFile(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "01-x", "title: X\nkind: lecture\norder: 1", map[string]string{
+		"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: [\"a.go\"]\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb",
+	})
+	// Create exercise dir with extra unlisted file
+	exDir := filepath.Join(root, "01-x", "exercises", "01-a")
+	if err := os.MkdirAll(exDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(exDir, "a.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(exDir, "extra.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coursefs.Load(root); err == nil || !strings.Contains(err.Error(), "extra.go") || !strings.Contains(err.Error(), "unlisted") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCodeStepGoMod(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "01-x", "title: X\nkind: lecture\norder: 1", map[string]string{
+		"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: [\"a.go\"]\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb",
+	})
+	// Create exercise dir with go.mod
+	exDir := filepath.Join(root, "01-x", "exercises", "01-a")
+	if err := os.MkdirAll(exDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(exDir, "a.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(exDir, "go.mod"), []byte("module a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coursefs.Load(root); err == nil || !strings.Contains(err.Error(), "go.mod") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCodeStepDuplicateReadonlyFile(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "01-x", "title: X\nkind: lecture\norder: 1", map[string]string{
+		"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: [\"a.go\"]\n  readonly: [\"b.go\", \"b.go\"]\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb",
+	})
+	// Create exercise dir with both files
+	exDir := filepath.Join(root, "01-x", "exercises", "01-a")
+	if err := os.MkdirAll(exDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(exDir, "a.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(exDir, "b.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Should NOT fail with "both editable and readonly" for b.go (duplicate in readonly alone)
+	if _, err := coursefs.Load(root); err != nil {
+		t.Fatalf("duplicate in readonly alone should not fail: err = %v", err)
 	}
 }
 

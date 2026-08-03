@@ -160,7 +160,7 @@ func loadStep(moduleDir, path string) (course.Step, error) {
 		Title:       sy.Title,
 		Type:        typ,
 		Question:    strings.TrimSpace(sy.Question),
-		Video:       sy.Video,
+		Video:       strings.TrimSpace(sy.Video),
 		Attribution: strings.TrimSpace(sy.Attribution),
 	}
 	if typ == course.StepSubmit {
@@ -196,14 +196,24 @@ func loadStep(moduleDir, path string) (course.Step, error) {
 		if err != nil {
 			return course.Step{}, fmt.Errorf("%s: code.timeout: %w", path, err)
 		}
-		listed := map[string]bool{}
+		editableSet := make(map[string]bool)
 		for _, f := range sy.Code.Editable {
-			listed[f] = true
+			editableSet[f] = true
 		}
+		readonlySet := make(map[string]bool)
 		for _, f := range sy.Code.Readonly {
-			if listed[f] {
+			readonlySet[f] = true
+		}
+		for f := range editableSet {
+			if readonlySet[f] {
 				return course.Step{}, fmt.Errorf("%s: %q is both editable and readonly", path, f)
 			}
+		}
+		listed := make(map[string]bool)
+		for f := range editableSet {
+			listed[f] = true
+		}
+		for f := range readonlySet {
 			listed[f] = true
 		}
 		exDir := filepath.Join(moduleDir, "exercises", step.Slug)
