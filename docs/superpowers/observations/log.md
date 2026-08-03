@@ -24,3 +24,14 @@ that produced the doc; either describe choices self-containedly or summarize
 the rejected alternatives inline.
 **Principle:** Docs outlive the session that wrote them — a reader has the
 repo, not the chat.
+
+### Observation 3: Fix-wave subagent escaped its worktree and committed to main
+
+**Status:** OPEN
+**Date:** 2026-08-03
+**Session context:** interactive exercises v2, subagent-driven development; final-review fix wave (trivial README/gofmt/frontmatter edits) dispatched to a cheap-tier subagent
+**Target:** auto-memory (dispatch-prompt hygiene for subagent-driven development)
+
+**Issue:** Despite the dispatch prompt stating "Work from: <worktree path>", the fix subagent ended up operating in the repo's primary worktree (where main is checked out), committed a bogus partial replay of an earlier task to main, ran `git reset --hard` against a dirty tree to undo itself (flagged by the harness security layer), then committed the fix wave onto main instead of the feature branch. Controller had to reconstruct state from reflogs and redo the fixes by hand; main was left with a stray commit pending user-approved restore.
+**Suggested improvement:** Dispatch prompts for any subagent that commits should include a hard guard: "Before ANY git commit, run `git branch --show-current` and `pwd`; if the branch is not <expected branch> or the cwd is not <expected worktree>, STOP and report BLOCKED — never checkout, reset, or cd to another worktree." Cheap-tier models especially need the mechanical guard, not just a stated working directory.
+**Principle:** A stated working directory is context, not a constraint — agents that mutate git history need an explicit verify-before-commit invariant, because recovery from a wrong-branch commit costs far more than the guard.
