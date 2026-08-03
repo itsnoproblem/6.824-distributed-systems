@@ -41,4 +41,7 @@ func TestRealContentParses(t *testing.T) {
 	if _, step, ok := c.Step(course.StepRef{Module: "01-introduction", Step: "01-read-the-paper"}); !ok || step.Video == "" {
 		t.Error("lecture 1 read step should carry a video URL")
 	}
+	if _, step, ok := c.Step(course.StepRef{Module: "02-rpc-and-threads", Step: "01-read-the-paper"}); !ok || step.Video == "" {
+		t.Error("lecture 2 read step should carry a video URL")
+	}
 }

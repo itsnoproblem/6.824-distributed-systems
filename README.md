@@ -58,8 +58,12 @@ evaluation records the rubric version it used.
 
 Each module is a directory under `content/modules/<slug>/` with a
 `module.yaml` and ordered `steps/*.md` (frontmatter: `title`, `type`
-`reading|question|exercise|submit`; `question:` text for question steps; an
-`eval:` block with `workdir`/`globs`/`test_cmd`/`timeout` for submit steps).
+`reading|question|exercise|submit|code`; `question:` text for question
+steps; an `eval:` block with `workdir`/`globs`/`test_cmd`/`timeout` for
+submit steps; a `code:` block for code steps — see Interactive exercises
+below). Any step may add `video:` (rendered as a privacy-enhanced YouTube
+embed with a plain-link fallback) and `attribution:` (credit line for
+adapted CC BY material).
 Malformed content fails boot with a precise message; `make test` catches it
 first. `scripts/gen-skeleton` stubs any module that doesn't exist yet and
 never touches existing directories.
@@ -92,7 +96,8 @@ make run    # build + serve
 ```
 
 Architecture: Go + HTMX + [templ](https://templ.guide), one binary. Feature
-packages (`internal/tour`, `internal/notes`, `internal/eval`) each split
+packages (`internal/tour`, `internal/notes`, `internal/eval`,
+`internal/exercise`) each split
 into transport / endpoint / service layers; services define the interfaces
 they consume, `internal/coursefs` (file-backed course), `internal/sqlite`
 (user state), and `internal/openrouter` (LLM) implement them. The design

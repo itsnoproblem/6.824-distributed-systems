@@ -1,6 +1,7 @@
 ---
 title: Read the paper
 type: reading
+video: "https://www.youtube.com/watch?v=gA4YXUJX7t8"
 ---
 
 Read this lecture's paper (find it on the schedule page linked above).

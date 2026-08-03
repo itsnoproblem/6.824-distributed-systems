@@ -39,7 +39,7 @@ type EvalMeta struct {
 
 // CodeMeta configures a code exercise step with scaffold files.
 type CodeMeta struct {
-	Mode     string            // "fix" | "create"
+	Mode     string // "fix" | "create"
 	Editable []string
 	Readonly []string
 	Run      []string

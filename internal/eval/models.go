@@ -32,7 +32,7 @@ type Submission struct {
 	Content    string // answer text, or JSON map[path]source for labs
 	TestOutput string
 	Status     Status
-	Passed     *bool  // exercise runs only: tests passed; nil for lab/question
+	Passed     *bool // exercise runs only: tests passed; nil for lab/question
 	CreatedAt  time.Time
 }
 
