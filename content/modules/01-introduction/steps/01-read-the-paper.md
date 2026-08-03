@@ -1,6 +1,7 @@
 ---
 title: Read the MapReduce paper
 type: reading
+video: "https://www.youtube.com/watch?v=cQP8WApzIQQ"
 ---
 
 Read *MapReduce: Simplified Data Processing on Large Clusters* (Dean &

@@ -59,3 +59,11 @@ func TestBrowseAndComplete(t *testing.T) {
 		t.Fatalf("unknown step = %d, want 404", code)
 	}
 }
+
+func TestAttributionPage(t *testing.T) {
+	app := newApp(t, options{})
+	code, body := get(t, app.TS.URL+"/attribution")
+	if code != 200 || !strings.Contains(body, "Attribution") {
+		t.Fatalf("attribution page: %d", code)
+	}
+}

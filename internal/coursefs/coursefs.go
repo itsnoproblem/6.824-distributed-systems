@@ -250,6 +250,20 @@ func loadStep(moduleDir, path string) (course.Step, error) {
 	return step, nil
 }
 
+// RenderMarkdownFile renders a standalone markdown file (e.g. the
+// attribution page) to HTML with the same renderer the course content uses.
+func RenderMarkdownFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := goldmark.New().Convert(raw, &buf); err != nil {
+		return "", fmt.Errorf("%s: render markdown: %w", path, err)
+	}
+	return buf.String(), nil
+}
+
 // Repo is the injectable wrapper satisfying each feature's CourseRepo interface.
 type Repo struct{ c *course.Course }
 

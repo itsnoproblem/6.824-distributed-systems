@@ -62,3 +62,4 @@ textarea { width: 100%; font: inherit; padding: .5rem; border: 1px solid #ccc; b
 .video-fallback { font-size: .8rem; margin-top: 0; }
 .save-error { font-size: .82rem; color: #b00020; background: #fdecea; padding: .4rem .6rem;
   border-radius: 4px; margin: .5rem 0 0; }
+.footer { margin-top: 3rem; font-size: .8rem; color: #888; }

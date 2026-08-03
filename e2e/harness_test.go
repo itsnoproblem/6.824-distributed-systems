@@ -54,6 +54,12 @@ func newApp(t *testing.T, o options) *app {
 	tour.RegisterRoutes(mux, tour.NewService(courseRepo, progressRepo))
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 
+	attributionHTML, err := coursefs.RenderMarkdownFile(filepath.Join(o.ContentDir, "ATTRIBUTION.md"))
+	if err != nil {
+		t.Fatalf("attribution page: %v", err)
+	}
+	tour.RegisterAttribution(mux, attributionHTML)
+
 	evalSvc, err := eval.NewService(courseRepo, subsRepo,
 		progressRepo, o.LLM, o.Lab, o.ContentDir,
 		eval.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state

@@ -50,6 +50,14 @@ func RegisterRoutes(mux *http.ServeMux, svc TourService) {
 	})
 }
 
+// RegisterAttribution serves the pre-rendered attribution page.
+func RegisterAttribution(mux *http.ServeMux, bodyHTML string) {
+	mux.HandleFunc("GET /attribution", func(w http.ResponseWriter, r *http.Request) {
+		api.RenderHTML(w, r, http.StatusOK,
+			templates.Document("Attribution", templates.SimplePage("Attribution", bodyHTML)))
+	})
+}
+
 func courseMapVM(v CourseMapView) templates.CourseMapVM {
 	out := templates.CourseMapVM{Done: v.Done, Total: v.Total}
 	for _, g := range v.Groups {

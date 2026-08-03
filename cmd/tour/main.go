@@ -52,6 +52,12 @@ func main() {
 	tour.RegisterRoutes(mux, tour.NewService(courseRepo, progressRepo))
 	notes.RegisterRoutes(mux, notes.NewService(courseRepo, sqlite.NewNotesRepo(db)))
 
+	attributionHTML, err := coursefs.RenderMarkdownFile(filepath.Join(cfg.ContentDir, "ATTRIBUTION.md"))
+	if err != nil {
+		log.Fatalf("attribution page: %v", err)
+	}
+	tour.RegisterAttribution(mux, attributionHTML)
+
 	subsRepo := sqlite.NewSubmissionRepo(db)
 
 	var llm eval.LLM

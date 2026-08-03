@@ -1,0 +1,11 @@
+package templates
+
+templ SimplePage(title string, bodyHTML string) {
+	<header class="topbar">
+		<a href="/">⌂ Map</a>
+		<span class="topbar-title">{ title }</span>
+	</header>
+	<main class="content">
+		@templ.Raw(bodyHTML)
+	</main>
+}
