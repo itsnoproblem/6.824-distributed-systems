@@ -13,6 +13,7 @@ type Kind string
 const (
 	KindLab      Kind = "lab"
 	KindQuestion Kind = "question"
+	KindExercise Kind = "exercise"
 )
 
 type Status string
@@ -31,6 +32,7 @@ type Submission struct {
 	Content    string // answer text, or JSON map[path]source for labs
 	TestOutput string
 	Status     Status
+	Passed     *bool  // exercise runs only: tests passed; nil for lab/question
 	CreatedAt  time.Time
 }
 

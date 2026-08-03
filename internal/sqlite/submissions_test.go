@@ -134,3 +134,45 @@ func TestEvaluationRoundTrip(t *testing.T) {
 		t.Fatalf("eval: %v %+v", err, e)
 	}
 }
+
+// TestMigration002PreservesData simulates a v1 database: apply only 001,
+// insert a lab submission, then run the full Migrate and verify the row
+// survived and the new kind + passed flag work.
+func TestMigration002PreservesData(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := sqlite.MigrateUpTo(db, "001_init.sql"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO submissions
+		(module_slug, step_slug, kind, content, test_output, status, created_at)
+		VALUES ('m', 's', 'lab', 'code', 'out', 'complete', '2026-08-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlite.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := sqlite.NewSubmissionRepo(db)
+	ctx := context.Background()
+	old, err := repo.GetSubmission(ctx, 1)
+	if err != nil || old.Content != "code" || old.Status != eval.StatusComplete || old.Passed != nil {
+		t.Fatalf("v1 row mangled: %+v err=%v", old, err)
+	}
+	id, err := repo.InsertSubmission(ctx, eval.Submission{
+		Ref: course.StepRef{Module: "m", Step: "x"}, Kind: eval.KindExercise,
+		Content: "{}", Status: eval.StatusPending, CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("exercise kind rejected: %v", err)
+	}
+	if err := repo.SetPassed(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.GetSubmission(ctx, id)
+	if got.Passed == nil || !*got.Passed {
+		t.Fatalf("passed not persisted: %+v", got)
+	}
+}

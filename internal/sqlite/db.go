@@ -24,7 +24,12 @@ func Open(path string) (*sql.DB, error) {
 	return db, db.Ping()
 }
 
-func Migrate(db *sql.DB) error {
+// Migrate applies every embedded migration not yet recorded.
+func Migrate(db *sql.DB) error { return MigrateUpTo(db, "") }
+
+// MigrateUpTo applies migrations in filename order, stopping after `last`
+// when it is non-empty. Exists so tests can construct historical schemas.
+func MigrateUpTo(db *sql.DB, last string) error {
 	if _, err := db.Exec(
 		"CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)"); err != nil {
 		return err
@@ -53,6 +58,9 @@ func Migrate(db *sql.DB) error {
 		}
 		if err := applyMigration(db, name, string(raw)); err != nil {
 			return err
+		}
+		if name == last {
+			return nil
 		}
 	}
 	return nil
