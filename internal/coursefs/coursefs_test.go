@@ -23,7 +23,7 @@ func TestLoadValid(t *testing.T) {
 	if alpha.Slug != "01-alpha" || alpha.Kind != course.KindLecture || alpha.Links.Paper == "" {
 		t.Fatalf("alpha parsed wrong: %+v", alpha)
 	}
-	if len(alpha.Steps) != 2 || alpha.Steps[0].Slug != "01-read" {
+	if len(alpha.Steps) != 3 || alpha.Steps[0].Slug != "01-read" {
 		t.Fatalf("alpha steps: %+v", alpha.Steps)
 	}
 	if !strings.Contains(alpha.Steps[0].BodyHTML, "<strong>paper</strong>") {
@@ -71,6 +71,12 @@ func TestLoadErrors(t *testing.T) {
 			map[string]string{"01-a.md": "---\ntitle: T\ntype: question\n---\nb"}, "question"},
 		{"submit without eval", "title: X\nkind: lab\norder: 1",
 			map[string]string{"01-a.md": "---\ntitle: T\ntype: submit\n---\nb"}, "eval"},
+		{"code without block", "title: X\nkind: lecture\norder: 1",
+			map[string]string{"01-a.md": "---\ntitle: T\ntype: code\n---\nb"}, "code"},
+		{"code bad mode", "title: X\nkind: lecture\norder: 1",
+			map[string]string{"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: guess\n  editable: [\"a.go\"]\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb"}, "mode"},
+		{"code no editable", "title: X\nkind: lecture\norder: 1",
+			map[string]string{"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: []\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb"}, "editable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,6 +88,47 @@ func TestLoadErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadCodeStep(t *testing.T) {
+	c, err := coursefs.Load("testdata/valid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, step, ok := c.Step(course.StepRef{Module: "01-alpha", Step: "03-code"})
+	if !ok || step.Type != course.StepCode {
+		t.Fatalf("code step missing: %v %v", step, ok)
+	}
+	if step.Video == "" || step.Attribution == "" {
+		t.Errorf("video/attribution not parsed: %+v", step)
+	}
+	m := step.Code
+	if m == nil || m.Mode != "fix" || len(m.Editable) != 1 || len(m.Readonly) != 1 ||
+		m.Timeout != time.Minute || len(m.Run) != 3 {
+		t.Fatalf("code meta: %+v", m)
+	}
+	if !strings.Contains(m.Files["adder.go"], "a - b") ||
+		!strings.Contains(m.Files["adder_test.go"], "TestAdd") {
+		t.Fatalf("scaffold files not loaded: %v", mapsKeys(m.Files))
+	}
+}
+
+func TestCodeStepMissingScaffoldFile(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "01-x", "title: X\nkind: lecture\norder: 1", map[string]string{
+		"01-a.md": "---\ntitle: T\ntype: code\ncode:\n  mode: fix\n  editable: [\"gone.go\"]\n  run: [\"go\", \"test\"]\n  timeout: 1m\n---\nb",
+	})
+	if _, err := coursefs.Load(root); err == nil || !strings.Contains(err.Error(), "gone.go") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func mapsKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func TestRepo(t *testing.T) {

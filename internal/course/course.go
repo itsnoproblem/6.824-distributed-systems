@@ -19,6 +19,7 @@ const (
 	StepQuestion StepType = "question"
 	StepExercise StepType = "exercise"
 	StepSubmit   StepType = "submit"
+	StepCode     StepType = "code"
 )
 
 // StepRef is the canonical identity of a step across the whole app.
@@ -36,12 +37,25 @@ type EvalMeta struct {
 	Timeout time.Duration
 }
 
+// CodeMeta configures a code exercise step with scaffold files.
+type CodeMeta struct {
+	Mode     string            // "fix" | "create"
+	Editable []string
+	Readonly []string
+	Run      []string
+	Timeout  time.Duration
+	Files    map[string]string // scaffold filename -> source
+}
+
 type Step struct {
 	Slug, Title string
 	Type        StepType
 	BodyHTML    string
 	Question    string
 	Eval        *EvalMeta
+	Code        *CodeMeta
+	Video       string
+	Attribution string
 }
 
 type Module struct {

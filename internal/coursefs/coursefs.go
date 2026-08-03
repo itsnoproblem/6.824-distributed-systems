@@ -30,15 +30,24 @@ type moduleYAML struct {
 }
 
 type stepYAML struct {
-	Title    string `yaml:"title"`
-	Type     string `yaml:"type"`
-	Question string `yaml:"question"`
-	Eval     *struct {
+	Title       string `yaml:"title"`
+	Type        string `yaml:"type"`
+	Question    string `yaml:"question"`
+	Video       string `yaml:"video"`
+	Attribution string `yaml:"attribution"`
+	Eval        *struct {
 		Workdir string   `yaml:"workdir"`
 		Globs   []string `yaml:"globs"`
 		TestCmd []string `yaml:"test_cmd"`
 		Timeout string   `yaml:"timeout"`
 	} `yaml:"eval"`
+	Code *struct {
+		Mode     string   `yaml:"mode"`
+		Editable []string `yaml:"editable"`
+		Readonly []string `yaml:"readonly"`
+		Run      []string `yaml:"run"`
+		Timeout  string   `yaml:"timeout"`
+	} `yaml:"code"`
 }
 
 var validKinds = map[string]course.Kind{
@@ -47,7 +56,7 @@ var validKinds = map[string]course.Kind{
 
 var validTypes = map[string]course.StepType{
 	"reading": course.StepReading, "question": course.StepQuestion,
-	"exercise": course.StepExercise, "submit": course.StepSubmit,
+	"exercise": course.StepExercise, "submit": course.StepSubmit, "code": course.StepCode,
 }
 
 // Load parses every module under dir and returns the assembled course.
@@ -106,7 +115,7 @@ func loadModule(dir, slug string) (course.Module, error) {
 	var steps []course.Step
 	seenSteps := map[string]bool{}
 	for _, f := range stepFiles {
-		s, err := loadStep(f)
+		s, err := loadStep(dir, f)
 		if err != nil {
 			return course.Module{}, err
 		}
@@ -123,7 +132,7 @@ func loadModule(dir, slug string) (course.Module, error) {
 	}, nil
 }
 
-func loadStep(path string) (course.Step, error) {
+func loadStep(moduleDir, path string) (course.Step, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return course.Step{}, fmt.Errorf("%s: %w", path, err)
@@ -147,10 +156,12 @@ func loadStep(path string) (course.Step, error) {
 		return course.Step{}, fmt.Errorf("%s: question steps require a question", path)
 	}
 	step := course.Step{
-		Slug:     strings.TrimSuffix(filepath.Base(path), ".md"),
-		Title:    sy.Title,
-		Type:     typ,
-		Question: strings.TrimSpace(sy.Question),
+		Slug:        strings.TrimSuffix(filepath.Base(path), ".md"),
+		Title:       sy.Title,
+		Type:        typ,
+		Question:    strings.TrimSpace(sy.Question),
+		Video:       sy.Video,
+		Attribution: strings.TrimSpace(sy.Attribution),
 	}
 	if typ == course.StepSubmit {
 		if sy.Eval == nil {
@@ -166,6 +177,59 @@ func loadStep(path string) (course.Step, error) {
 		step.Eval = &course.EvalMeta{
 			Workdir: sy.Eval.Workdir, Globs: sy.Eval.Globs,
 			TestCmd: sy.Eval.TestCmd, Timeout: timeout,
+		}
+	}
+	if typ == course.StepCode {
+		if sy.Code == nil {
+			return course.Step{}, fmt.Errorf("%s: code steps require a code block", path)
+		}
+		if sy.Code.Mode != "fix" && sy.Code.Mode != "create" {
+			return course.Step{}, fmt.Errorf("%s: code.mode must be fix or create, got %q", path, sy.Code.Mode)
+		}
+		if len(sy.Code.Editable) == 0 {
+			return course.Step{}, fmt.Errorf("%s: code.editable requires at least one file", path)
+		}
+		if len(sy.Code.Run) == 0 {
+			return course.Step{}, fmt.Errorf("%s: code.run is required", path)
+		}
+		timeout, err := time.ParseDuration(sy.Code.Timeout)
+		if err != nil {
+			return course.Step{}, fmt.Errorf("%s: code.timeout: %w", path, err)
+		}
+		listed := map[string]bool{}
+		for _, f := range sy.Code.Editable {
+			listed[f] = true
+		}
+		for _, f := range sy.Code.Readonly {
+			if listed[f] {
+				return course.Step{}, fmt.Errorf("%s: %q is both editable and readonly", path, f)
+			}
+			listed[f] = true
+		}
+		exDir := filepath.Join(moduleDir, "exercises", step.Slug)
+		files := map[string]string{}
+		for f := range listed {
+			raw, err := os.ReadFile(filepath.Join(exDir, f))
+			if err != nil {
+				return course.Step{}, fmt.Errorf("%s: scaffold file %s: %w", path, f, err)
+			}
+			files[f] = string(raw)
+		}
+		entries, err := os.ReadDir(exDir)
+		if err != nil {
+			return course.Step{}, fmt.Errorf("%s: %w", path, err)
+		}
+		for _, e := range entries {
+			if e.Name() == "go.mod" {
+				return course.Step{}, fmt.Errorf("%s: scaffolds must not include go.mod", path)
+			}
+			if !listed[e.Name()] {
+				return course.Step{}, fmt.Errorf("%s: unlisted file %s in exercises dir", path, e.Name())
+			}
+		}
+		step.Code = &course.CodeMeta{
+			Mode: sy.Code.Mode, Editable: sy.Code.Editable, Readonly: sy.Code.Readonly,
+			Run: sy.Code.Run, Timeout: timeout, Files: files,
 		}
 	}
 	var buf bytes.Buffer
