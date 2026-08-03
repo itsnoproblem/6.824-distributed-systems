@@ -97,6 +97,8 @@ type ExerciseVM struct {
 	Passed               bool
 	Output               string
 	SubmissionID         int64
+	FeedbackEnabled      bool
+	Report               *ReportVM
 }
 
 // YouTubeEmbedURL converts a YouTube watch URL into a privacy-enhanced

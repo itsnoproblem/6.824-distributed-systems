@@ -71,9 +71,13 @@ func newApp(t *testing.T, o options) *app {
 	}
 	eval.RegisterRoutes(mux, evalSvc)
 
-	exercise.RegisterRoutes(mux, exercise.NewService(courseRepo, sqlite.NewDraftsRepo(db),
-		subsRepo, progressRepo, exercise.Workspace{},
-		exercise.WithRunAsync(func(f func()) { f() }))) // synchronous: tests see final state
+	exerciseSvc, err := exercise.NewService(courseRepo, sqlite.NewDraftsRepo(db),
+		subsRepo, progressRepo, exercise.Workspace{}, o.LLM, o.ContentDir,
+		exercise.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state
+	if err != nil {
+		t.Fatalf("exercise service: %v", err)
+	}
+	exercise.RegisterRoutes(mux, exerciseSvc)
 
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)

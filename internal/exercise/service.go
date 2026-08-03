@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"time"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
@@ -30,6 +31,8 @@ type SubmissionRepo interface {
 	SetPassed(ctx context.Context, id int64, passed bool) error
 	GetSubmission(ctx context.Context, id int64) (eval.Submission, error)
 	LatestForStep(ctx context.Context, ref course.StepRef) (*eval.Submission, error)
+	InsertEvaluation(ctx context.Context, e eval.Evaluation) (int64, error)
+	EvaluationForSubmission(ctx context.Context, submissionID int64) (*eval.Evaluation, error)
 }
 
 type Runner interface {
@@ -47,6 +50,8 @@ type Service struct {
 	subs     SubmissionRepo
 	progress ProgressMarker
 	runner   Runner
+	llm      eval.LLM
+	rubric   eval.Rubric
 	runAsync func(func())
 	now      func() time.Time
 }
@@ -56,16 +61,29 @@ type Option func(*Service)
 // WithRunAsync overrides how runs are scheduled; tests run them inline.
 func WithRunAsync(f func(func())) Option { return func(s *Service) { s.runAsync = f } }
 
-func NewService(c CourseRepo, d DraftRepo, subs SubmissionRepo, p ProgressMarker, r Runner, opts ...Option) *Service {
+// NewService wires the exercise engine. llm is nil in locked mode: the
+// service still saves drafts and runs tests, but FeedbackEnabled reports
+// false and Feedback rejects requests.
+func NewService(c CourseRepo, d DraftRepo, subs SubmissionRepo, p ProgressMarker, r Runner,
+	llm eval.LLM, contentDir string, opts ...Option) (*Service, error) {
+	rubric, err := eval.LoadRubric(filepath.Join(contentDir, "rubric", "exercise.md"))
+	if err != nil {
+		return nil, fmt.Errorf("load exercise rubric: %w", err)
+	}
 	s := &Service{
 		course: c, drafts: d, subs: subs, progress: p, runner: r,
+		llm: llm, rubric: rubric,
 		runAsync: func(f func()) { go f() }, now: time.Now,
 	}
 	for _, o := range opts {
 		o(s)
 	}
-	return s
+	return s, nil
 }
+
+// FeedbackEnabled reports whether evaluation mode is unlocked — an LLM was
+// configured at construction. When false, Feedback rejects every request.
+func (s *Service) FeedbackEnabled() bool { return s.llm != nil }
 
 func (s *Service) codeStep(ref course.StepRef) (*course.Step, error) {
 	_, step, ok := s.course.Course().Step(ref)
@@ -113,6 +131,11 @@ func (s *Service) State(ctx context.Context, ref course.StepRef) (View, error) {
 	}
 	if view.Submission, err = s.subs.LatestForStep(ctx, ref); err != nil {
 		return View{}, err
+	}
+	if view.Submission != nil {
+		if view.Evaluation, err = s.subs.EvaluationForSubmission(ctx, view.Submission.ID); err != nil {
+			return View{}, err
+		}
 	}
 	return view, nil
 }
@@ -242,6 +265,56 @@ func (s *Service) evaluate(id int64) {
 			log.Printf("exercise evaluate: mark %s complete: %v", sub.Ref, err)
 		}
 	}
+}
+
+// Feedback reviews the latest completed run with the LLM. Synchronous —
+// exercise code is small and the wait is a click away from the result.
+//
+// sub.Content holds the full materialized workspace (generated go.mod plus
+// every scaffold file, editable and readonly, with the draft overlay
+// applied) — the same snapshot the runner executed, kept for
+// reproducibility. That's more than a reviewer needs: the prompt shows only
+// the student's editable files, extracted via step.Code.Editable, so go.mod
+// and other read-only scaffold noise never reach the model.
+func (s *Service) Feedback(ctx context.Context, ref course.StepRef) error {
+	step, err := s.codeStep(ref)
+	if err != nil {
+		return err
+	}
+	if s.llm == nil {
+		return fmt.Errorf("%w: evaluation mode is locked", api.ErrInvalid)
+	}
+	sub, err := s.subs.LatestForStep(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if sub == nil || sub.Status != eval.StatusComplete {
+		return fmt.Errorf("%w: run the exercise before requesting feedback", api.ErrInvalid)
+	}
+	var full map[string]string
+	if err := json.Unmarshal([]byte(sub.Content), &full); err != nil {
+		return err
+	}
+	editable := make(map[string]string, len(step.Code.Editable))
+	for _, name := range step.Code.Editable {
+		editable[name] = full[name]
+	}
+	mod, _, _ := s.course.Course().Step(ref)
+	passed := sub.Passed != nil && *sub.Passed
+	system, user := BuildExercisePrompt(s.rubric, *mod, *step, editable, sub.TestOutput, passed)
+	raw, err := s.llm.Complete(ctx, system, user)
+	if err != nil {
+		return fmt.Errorf("feedback: %w", err)
+	}
+	verdict, err := eval.ParseVerdict(raw)
+	if err != nil {
+		return fmt.Errorf("feedback verdict: %w", err)
+	}
+	_, err = s.subs.InsertEvaluation(ctx, eval.Evaluation{
+		SubmissionID: sub.ID, Model: s.llm.Model(), RubricVersion: s.rubric.Version,
+		Verdict: verdict, CreatedAt: s.now().UTC(),
+	})
+	return err
 }
 
 func (s *Service) RefForSubmission(ctx context.Context, id int64) (course.StepRef, error) {

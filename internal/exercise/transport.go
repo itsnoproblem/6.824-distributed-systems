@@ -18,6 +18,7 @@ func RegisterRoutes(mux *http.ServeMux, svc ExerciseService) {
 	saveDraft := makeSaveDraftEndpoint(svc)
 	check := makeCheckEndpoint(svc)
 	run := makeRunEndpoint(svc)
+	feedback := makeFeedbackEndpoint(svc)
 	reset := makeResetEndpoint(svc)
 	status := makeStatusEndpoint(svc)
 
@@ -30,7 +31,7 @@ func RegisterRoutes(mux *http.ServeMux, svc ExerciseService) {
 			return
 		}
 		res := resp.(StateResponse)
-		api.RenderHTML(w, r, http.StatusOK, templates.ExerciseSection(exerciseVM(res.Ref, res.View)))
+		api.RenderHTML(w, r, http.StatusOK, templates.ExerciseSection(exerciseVM(res.Ref, res.View, svc.FeedbackEnabled())))
 	}
 	renderStatus := func(w http.ResponseWriter, r *http.Request, resp any, err error) {
 		if err != nil {
@@ -38,7 +39,7 @@ func RegisterRoutes(mux *http.ServeMux, svc ExerciseService) {
 			return
 		}
 		res := resp.(StateResponse)
-		api.RenderHTML(w, r, http.StatusOK, templates.ExerciseStatus(exerciseVM(res.Ref, res.View)))
+		api.RenderHTML(w, r, http.StatusOK, templates.ExerciseStatus(exerciseVM(res.Ref, res.View, svc.FeedbackEnabled())))
 	}
 
 	mux.HandleFunc("GET /exercises/{module}/{step}", func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +87,11 @@ func RegisterRoutes(mux *http.ServeMux, svc ExerciseService) {
 		renderStatus(w, r, resp, err)
 	})
 
+	mux.HandleFunc("POST /exercises/{module}/{step}/feedback", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := feedback(r.Context(), pathReq(r))
+		renderStatus(w, r, resp, err)
+	})
+
 	mux.HandleFunc("POST /exercises/{module}/{step}/reset", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := reset(r.Context(), pathReq(r))
 		renderSection(w, r, resp, err)
@@ -102,7 +108,7 @@ func RegisterRoutes(mux *http.ServeMux, svc ExerciseService) {
 	})
 }
 
-func exerciseVM(ref course.StepRef, v View) templates.ExerciseVM {
+func exerciseVM(ref course.StepRef, v View, feedbackEnabled bool) templates.ExerciseVM {
 	files := make([]templates.ExerciseFileVM, 0, len(v.Files))
 	for _, f := range v.Files {
 		files = append(files, templates.ExerciseFileVM{Name: f.Name, Content: f.Content, Readonly: f.Readonly})
@@ -118,7 +124,7 @@ func exerciseVM(ref course.StepRef, v View) templates.ExerciseVM {
 		ModuleSlug: ref.Module, StepSlug: ref.Step,
 		Mode: v.Meta.Mode, ModeLabel: modeLabel(v.Meta.Mode),
 		Attribution: v.Step.Attribution, ConfigJSON: string(cfg),
-		Files: files,
+		Files: files, FeedbackEnabled: feedbackEnabled,
 	}
 	if v.Submission != nil {
 		vm.Status = string(v.Submission.Status)
@@ -127,6 +133,18 @@ func exerciseVM(ref course.StepRef, v View) templates.ExerciseVM {
 		if v.Submission.Passed != nil {
 			vm.Passed = *v.Submission.Passed
 		}
+	}
+	if v.Evaluation != nil {
+		r := templates.ReportVM{
+			Model: v.Evaluation.Model, RubricVersion: v.Evaluation.RubricVersion,
+			Summary: v.Evaluation.Verdict.Summary, NextSteps: v.Evaluation.Verdict.NextSteps,
+		}
+		for _, c := range v.Evaluation.Verdict.Criteria {
+			r.Criteria = append(r.Criteria, templates.CriterionVM{
+				Name: c.Name, Score: c.Score, Justification: c.Justification,
+			})
+		}
+		vm.Report = &r
 	}
 	return vm
 }

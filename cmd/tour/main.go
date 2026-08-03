@@ -77,8 +77,12 @@ func main() {
 	eval.RegisterRoutes(mux, evalSvc)
 	log.Printf("evaluation mode enabled: %v", evalSvc.Enabled())
 
-	exercise.RegisterRoutes(mux, exercise.NewService(courseRepo, sqlite.NewDraftsRepo(db),
-		subsRepo, progressRepo, exercise.Workspace{}))
+	exerciseSvc, err := exercise.NewService(courseRepo, sqlite.NewDraftsRepo(db),
+		subsRepo, progressRepo, exercise.Workspace{}, llm, cfg.ContentDir)
+	if err != nil {
+		log.Fatalf("exercise service: %v", err)
+	}
+	exercise.RegisterRoutes(mux, exerciseSvc)
 
 	log.Printf("tour listening on :%s", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))

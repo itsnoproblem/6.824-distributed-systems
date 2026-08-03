@@ -15,6 +15,8 @@ type ExerciseService interface {
 	ResetDraft(ctx context.Context, ref course.StepRef) error
 	Check(ctx context.Context, ref course.StepRef) ([]Diagnostic, error)
 	Run(ctx context.Context, ref course.StepRef) error
+	Feedback(ctx context.Context, ref course.StepRef) error
+	FeedbackEnabled() bool
 	RefForSubmission(ctx context.Context, id int64) (course.StepRef, error)
 }
 
@@ -81,6 +83,24 @@ func makeRunEndpoint(svc ExerciseService) api.Endpoint {
 		}
 		ref := course.StepRef{Module: req.Module, Step: req.Step}
 		if err := svc.Run(ctx, ref); err != nil {
+			return nil, err
+		}
+		view, err := svc.State(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		return StateResponse{Ref: ref, View: view}, nil
+	}
+}
+
+func makeFeedbackEndpoint(svc ExerciseService) api.Endpoint {
+	return func(ctx context.Context, request any) (any, error) {
+		req := request.(SectionRequest)
+		if err := req.Validate(); err != nil {
+			return nil, err
+		}
+		ref := course.StepRef{Module: req.Module, Step: req.Step}
+		if err := svc.Feedback(ctx, ref); err != nil {
 			return nil, err
 		}
 		view, err := svc.State(ctx, ref)

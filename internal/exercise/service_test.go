@@ -33,6 +33,11 @@ type env struct {
 
 func newEnv(t *testing.T) env {
 	t.Helper()
+	return newEnvWithLLM(t, nil)
+}
+
+func newEnvWithLLM(t *testing.T, llm eval.LLM) env {
+	t.Helper()
 	db, err := sqlite.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -43,9 +48,12 @@ func newEnv(t *testing.T) env {
 	}
 	progress := sqlite.NewProgressRepo(db)
 	subs := sqlite.NewSubmissionRepo(db)
-	svc := exercise.NewService(coursefs.NewRepo(fixtureCourse()), sqlite.NewDraftsRepo(db),
-		subs, progress, exercise.Workspace{},
+	svc, err := exercise.NewService(coursefs.NewRepo(fixtureCourse()), sqlite.NewDraftsRepo(db),
+		subs, progress, exercise.Workspace{}, llm, "../../content",
 		exercise.WithRunAsync(func(f func()) { f() }))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return env{svc: svc, progress: progress, subs: subs}
 }
 
@@ -241,5 +249,39 @@ func TestRefForSubmission(t *testing.T) {
 	}
 	if _, err := e.svc.RefForSubmission(ctx, sub.ID+9999); !errors.Is(err, api.ErrNotFound) {
 		t.Fatalf("unknown submission id: %v", err)
+	}
+}
+
+type fakeLLM struct{ resp string }
+
+func (f fakeLLM) Complete(context.Context, string, string) (string, error) { return f.resp, nil }
+func (f fakeLLM) Model() string                                            { return "fake/model" }
+
+const exerciseVerdict = `{"criteria":[{"name":"Correctness","score":5,"justification":"clean"}],` +
+	`"summary":"Nice work.","next_steps":["try the KV exercise"]}`
+
+func TestFeedbackStoresEvaluation(t *testing.T) {
+	e := newEnvWithLLM(t, fakeLLM{resp: exerciseVerdict}) // variant of newEnv passing the llm
+	ctx := context.Background()
+	if err := e.svc.Run(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Feedback(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.svc.State(ctx, ref)
+	if err != nil || v.Evaluation == nil || v.Evaluation.Verdict.Summary != "Nice work." {
+		t.Fatalf("evaluation: %+v err=%v", v.Evaluation, err)
+	}
+}
+
+func TestFeedbackLockedMode(t *testing.T) {
+	e := newEnv(t) // nil llm
+	ctx := context.Background()
+	if err := e.svc.Run(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Feedback(ctx, ref); !errors.Is(err, api.ErrInvalid) {
+		t.Fatalf("locked feedback err = %v", err)
 	}
 }

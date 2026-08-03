@@ -95,6 +95,49 @@ func TestExerciseCheckDiagnostics(t *testing.T) {
 	}
 }
 
+func TestExerciseFeedbackLockedMode(t *testing.T) {
+	app := newApp(t, options{})
+	base := app.TS.URL + "/exercises/03-test-code/01-fix"
+
+	if _, out := post(t, base+"/run"); !strings.Contains(out, "Tests failing") {
+		t.Fatalf("buggy run: %q", out)
+	}
+	// locked mode: no feedback button offered
+	if body := fetch(t, base); strings.Contains(body, "Get feedback") {
+		t.Fatalf("locked mode should not offer feedback: %q", body)
+	}
+	code, out := post(t, base+"/feedback")
+	if code != http.StatusBadRequest || !strings.Contains(out, "locked") {
+		t.Fatalf("locked feedback: %d %q", code, out)
+	}
+}
+
+func TestExerciseFeedbackEvaluated(t *testing.T) {
+	app := newApp(t, options{LLM: fakeLLM{resp: goodVerdict}})
+	base := app.TS.URL + "/exercises/03-test-code/01-fix"
+
+	if _, out := post(t, base+"/run"); !strings.Contains(out, "Tests failing") {
+		t.Fatalf("buggy run: %q", out)
+	}
+	// unlocked mode with a completed run: feedback button offered
+	if body := fetch(t, base); !strings.Contains(body, "Get feedback") {
+		t.Fatalf("unlocked mode should offer feedback: %q", body)
+	}
+	code, out := post(t, base+"/feedback")
+	if code != http.StatusOK {
+		t.Fatalf("feedback status: %d %q", code, out)
+	}
+	for _, want := range []string{"Correctness", "4/5", "Good answer.", "fake/model", "rubric v1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("report missing %q: %q", want, out)
+		}
+	}
+	// report persists across a fresh fetch of the section
+	if body := fetch(t, base); !strings.Contains(body, "Good answer.") {
+		t.Fatalf("evaluation not persisted: %q", body)
+	}
+}
+
 func TestVideoEmbedOnStepPage(t *testing.T) {
 	app := newApp(t, options{})
 	body := fetch(t, app.TS.URL+"/modules/03-test-code/steps/01-fix")

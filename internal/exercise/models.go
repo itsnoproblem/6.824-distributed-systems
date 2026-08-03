@@ -30,4 +30,5 @@ type View struct {
 	Files      []FileView // editable first, then readonly, each group in meta order
 	HasDraft   bool
 	Submission *eval.Submission // latest exercise run, nil if none
+	Evaluation *eval.Evaluation // LLM feedback on the latest submission, nil if none
 }
