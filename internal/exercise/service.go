@@ -35,6 +35,10 @@ type SubmissionRepo interface {
 type Runner interface {
 	RunExercise(ctx context.Context, meta *course.CodeMeta, editable map[string]string) (output string, exitCode int, err error)
 	CheckExercise(ctx context.Context, meta *course.CodeMeta, editable map[string]string) ([]Diagnostic, error)
+	// Materialize returns the full workspace file set (generated go.mod +
+	// every scaffold file, with editable files overlaid) without touching
+	// disk — used to snapshot exactly what a run will execute.
+	Materialize(meta *course.CodeMeta, editable map[string]string) map[string]string
 }
 
 type Service struct {
@@ -152,8 +156,13 @@ func (s *Service) Check(ctx context.Context, ref course.StepRef) ([]Diagnostic, 
 	return s.runner.CheckExercise(ctx, step.Code, editable)
 }
 
-// Run snapshots the effective file set into a submission and schedules the
-// async test run. The snapshot is stored before any side effect.
+// Run snapshots the full materialized file set — generated go.mod plus
+// every scaffold file, editable and readonly, with the draft overlay
+// applied to the editable ones — into a submission and schedules the async
+// test run. The snapshot is stored before any side effect, and it's the
+// complete workspace, not just the editable subset: submissions.content
+// keeps the full materialized file set for reproducibility, matching how
+// v1 labs snapshot everything the test run touched.
 func (s *Service) Run(ctx context.Context, ref course.StepRef) error {
 	step, err := s.codeStep(ref)
 	if err != nil {
@@ -163,7 +172,8 @@ func (s *Service) Run(ctx context.Context, ref course.StepRef) error {
 	if err != nil {
 		return err
 	}
-	content, err := json.Marshal(editable)
+	full := s.runner.Materialize(step.Code, editable)
+	content, err := json.Marshal(full)
 	if err != nil {
 		return err
 	}
@@ -199,14 +209,20 @@ func (s *Service) evaluate(id int64) {
 	if err := s.subs.UpdateSubmission(ctx, id, eval.StatusRunning, ""); err != nil {
 		log.Printf("exercise evaluate: update submission %d to running: %v", id, err)
 	}
-	var editable map[string]string
-	if err := json.Unmarshal([]byte(sub.Content), &editable); err != nil {
+	// sub.Content is the full materialized file set stored by Run (go.mod +
+	// every scaffold file, editable and readonly, with the draft overlay
+	// already applied) — unmarshal and execute exactly that snapshot.
+	// RunExercise only overlays keys named in meta.Editable, so passing the
+	// full set here is safe: the readonly files and go.mod it also carries
+	// are ignored as overlay and reconstructed identically from meta.
+	var files map[string]string
+	if err := json.Unmarshal([]byte(sub.Content), &files); err != nil {
 		if uerr := s.subs.UpdateSubmission(ctx, id, eval.StatusFailed, "snapshot decode error: "+err.Error()); uerr != nil {
 			log.Printf("exercise evaluate: update submission %d to failed (decode error): %v", id, uerr)
 		}
 		return
 	}
-	out, code, err := s.runner.RunExercise(ctx, step.Code, editable)
+	out, code, err := s.runner.RunExercise(ctx, step.Code, files)
 	if err != nil {
 		if uerr := s.subs.UpdateSubmission(ctx, id, eval.StatusFailed, out+"\n\nRUNNER ERROR: "+err.Error()); uerr != nil {
 			log.Printf("exercise evaluate: update submission %d to failed (runner error): %v", id, uerr)

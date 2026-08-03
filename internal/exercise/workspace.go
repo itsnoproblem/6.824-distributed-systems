@@ -30,32 +30,50 @@ func toSet(names []string) map[string]bool {
 	return set
 }
 
-// materialize writes go.mod + scaffold files, overlaying editable files
-// from the draft. Overlay keys outside meta.Editable are ignored — the
-// client can never rewrite the test harness.
+// buildFiles computes the full materialized file set for a step: a
+// generated go.mod plus every scaffold file, with editable scaffold files
+// overlaid by the matching entries in overlay. Overlay keys outside
+// meta.Editable are ignored — the client can never rewrite the test
+// harness. The result is the complete workspace contents, suitable for
+// writing to disk (materialize) or for snapshotting into
+// submissions.content (Materialize) without touching disk.
+func buildFiles(meta *course.CodeMeta, overlay map[string]string) map[string]string {
+	editableSet := toSet(meta.Editable)
+	files := map[string]string{"go.mod": "module exercise\n\ngo 1.25\n"}
+	for name, src := range meta.Files {
+		files[name] = src
+	}
+	for name, src := range overlay {
+		if editableSet[name] {
+			files[name] = src
+		}
+	}
+	return files
+}
+
+// materialize writes the full materialized file set (see buildFiles) to a
+// fresh temp dir.
 func (Workspace) materialize(meta *course.CodeMeta, editable map[string]string) (string, func(), error) {
 	dir, err := os.MkdirTemp("", "exercise-*")
 	if err != nil {
 		return "", nil, err
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
-	editableSet := toSet(meta.Editable)
-	files := map[string]string{"go.mod": "module exercise\n\ngo 1.25\n"}
-	for name, src := range meta.Files {
-		files[name] = src
-	}
-	for name, src := range editable {
-		if editableSet[name] {
-			files[name] = src
-		}
-	}
-	for name, src := range files {
+	for name, src := range buildFiles(meta, editable) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("materialize %s: %w", name, err)
 		}
 	}
 	return dir, cleanup, nil
+}
+
+// Materialize returns the full materialized file set — generated go.mod
+// plus every scaffold file, with editable files overlaid — without writing
+// anything to disk. Service.Run uses it to snapshot exactly what a run will
+// execute into submissions.content (reproducibility, matching v1 labs).
+func (Workspace) Materialize(meta *course.CodeMeta, editable map[string]string) map[string]string {
+	return buildFiles(meta, editable)
 }
 
 func (w Workspace) RunExercise(ctx context.Context, meta *course.CodeMeta, editable map[string]string) (string, int, error) {

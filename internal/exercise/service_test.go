@@ -2,6 +2,7 @@ package exercise_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,19 @@ func TestSaveDraftValidates(t *testing.T) {
 	}
 	if err := e.svc.SaveDraft(ctx, ref, map[string]string{"adder_test.go": "hax"}); !errors.Is(err, api.ErrInvalid) {
 		t.Fatalf("read-only file must be rejected: %v", err)
+	}
+}
+
+// TestSaveDraftRejectsEmptyFiles covers the empty-files guard in SaveDraft:
+// an empty map is invalid input, not a no-op.
+func TestSaveDraftRejectsEmptyFiles(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	if err := e.svc.SaveDraft(ctx, ref, map[string]string{}); !errors.Is(err, api.ErrInvalid) {
+		t.Fatalf("empty files map: %v", err)
+	}
+	if err := e.svc.SaveDraft(ctx, ref, nil); !errors.Is(err, api.ErrInvalid) {
+		t.Fatalf("nil files map: %v", err)
 	}
 }
 
@@ -171,5 +185,61 @@ func TestStateEmptyDraftIsScaffoldOnly(t *testing.T) {
 	}
 	if v.Files[1].Content != meta.Files["adder_test.go"] {
 		t.Fatalf("readonly file must be scaffold verbatim: %q", v.Files[1].Content)
+	}
+}
+
+// TestRunSnapshotsFullMaterializedFileSet covers the binding spec's
+// reproducibility requirement (docs/superpowers/specs/2026-08-03-interactive-exercises-design.md:139):
+// "Runs keep the full materialized file set in submissions.content
+// (reproducibility, as v1)". A run's stored content must be the complete
+// workspace — generated go.mod plus every scaffold file, editable AND
+// readonly, with the draft overlay applied to the editable one — not just
+// the editable map.
+func TestRunSnapshotsFullMaterializedFileSet(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	if err := e.svc.SaveDraft(ctx, ref, map[string]string{
+		"adder.go": "package adder // edited\n\nfunc Add(a, b int) int { return a + b }\n"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Run(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := e.subs.LatestForStep(ctx, ref)
+	if err != nil || sub == nil {
+		t.Fatalf("sub=%+v err=%v", sub, err)
+	}
+	var files map[string]string
+	if err := json.Unmarshal([]byte(sub.Content), &files); err != nil {
+		t.Fatalf("content is not a JSON file map: %v (content=%q)", err, sub.Content)
+	}
+	meta := adderMeta()
+	if !strings.Contains(files["go.mod"], "module exercise") {
+		t.Fatalf("content missing generated go.mod: %+v", files)
+	}
+	if files["adder_test.go"] != meta.Files["adder_test.go"] {
+		t.Fatalf("content missing/altered readonly file: %+v", files)
+	}
+	if !strings.Contains(files["adder.go"], "edited") {
+		t.Fatalf("content missing draft-overlaid editable file: %+v", files)
+	}
+}
+
+func TestRefForSubmission(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	if err := e.svc.Run(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := e.subs.LatestForStep(ctx, ref)
+	if err != nil || sub == nil {
+		t.Fatalf("sub=%+v err=%v", sub, err)
+	}
+	got, err := e.svc.RefForSubmission(ctx, sub.ID)
+	if err != nil || got != ref {
+		t.Fatalf("RefForSubmission(%d) = %+v, %v; want %+v, nil", sub.ID, got, err, ref)
+	}
+	if _, err := e.svc.RefForSubmission(ctx, sub.ID+9999); !errors.Is(err, api.ErrNotFound) {
+		t.Fatalf("unknown submission id: %v", err)
 	}
 }
