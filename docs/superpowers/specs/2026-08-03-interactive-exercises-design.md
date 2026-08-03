@@ -109,10 +109,10 @@ workspace. Behavior-preserving refactor with tests.
 
 ### Editor (client)
 
-- CodeMirror 6 with Go language support, vendored as a prebuilt ESM bundle
-  committed under `static/codemirror/` (built once with esbuild; the
-  regeneration recipe documented in the README — the normal build has no
-  node dependency).
+- CodeMirror 6 with Go language support, vendored as a prebuilt IIFE bundle
+  exposing `window.CM`, committed under `static/codemirror/` (built once
+  with esbuild; the regeneration recipe documented in the README — the
+  normal build has no node dependency).
 - `static/exercise.js` (~100 lines, the only bespoke client JS): tab bar
   (read-only tabs locked), autosave + check debouncing, lint-gutter
   markers from check diagnostics, Run via htmx, Cmd+Enter to run.
@@ -152,7 +152,9 @@ intent.
 - Check endpoint returns diagnostics for unparseable code — that is its
   purpose, never a 500.
 - Run failures land on the submission row with captured output (v1
-  invariant), retry included.
+  invariant). Retrying is re-clicking Run: drafts persist independent of
+  run outcome, so a fresh run from the live draft is a strict superset of
+  per-submission retry (which stays an eval-only feature).
 - Draft-save failures surface an error banner; the client retries on next
   change — keystrokes are never silently dropped.
 - Malformed exercise content fails boot with the offending path.
