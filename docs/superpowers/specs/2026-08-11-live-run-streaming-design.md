@@ -90,14 +90,15 @@ buffered path has today (timeout formatting included).
 Per surface (eval, exercise), two new endpoints following the package's
 existing endpoint/transport structure:
 
-- `GET .../runs/{id}/stream` — SSE. Replays accrued output, tails live,
-  sends periodic heartbeat comments to defeat idle timeouts, and ends with
-  a terminal event carrying the run's outcome. If the run is not live
-  (already finished or unknown), responds with a single terminal event
-  built from the stored submission, so a late-connecting client degrades
-  gracefully.
-- `POST .../runs/{id}/cancel` — cancels a live run; 404-equivalent error
-  for runs that are not live.
+- `GET /submissions/{id}/stream` and `GET /exercises/submissions/{id}/stream`
+  — SSE. Replays accrued output, tails live, sends periodic heartbeat
+  comments, and ends with a payload-free `done` event (the client refetches
+  the server-rendered section for the outcome). A submission with no live
+  run (finished, or in its LLM phase) receives an immediate `done`; an
+  unknown submission id is a 404.
+- `POST /submissions/{id}/cancel` and `POST /exercises/submissions/{id}/cancel`
+  — cancels a live run (204); a submission with no live run (including one
+  that just finished) is a 400.
 
 Note: the server intentionally sets no `WriteTimeout` (long-running
 responses); SSE makes that choice permanent rather than temporary.
@@ -120,8 +121,10 @@ responses); SSE makes that choice permanent rather than temporary.
 - Server restart mid-run: unchanged — `RecoverInterrupted` fails the
   orphaned submission at next boot.
 - Slow subscriber: drop-oldest buffer plus re-sync marker (above).
-- Cancel racing natural completion: `Cancel` after `Finish` is a no-op;
-  the terminal event reflects whichever happened first.
+- Cancel racing natural completion: `Cancel` after `Finish` is rejected
+  (400); terminal test-phase outcomes are persisted before the `done`
+  event is emitted, so a client that reacts to `done` by refetching the
+  section always sees the final status.
 
 ## Testing (TDD throughout)
 
