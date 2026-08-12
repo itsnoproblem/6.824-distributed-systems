@@ -44,14 +44,16 @@ correct finding, so it counts in the numerator.
 | 2026-08-12 | PR #6 | CodeRabbit | e2e cancel test could fire before the process started, weakening what it proved | TP-minor | Fixed: cancel now triggers only after observed output. |
 | 2026-08-12 | PR #6 | CodeRabbit | SSE handler ignored response write errors and kept heartbeating a broken connection | TP-minor | Fixed; low impact for a local app but correct. |
 | 2026-08-12 | PR #6 | CodeRabbit | JS cancel button stayed disabled on HTTP 4xx/5xx (only transport failure was handled) | TP-minor | Fixed. Caught the gap left by a same-day polish fix that only covered rejections. |
-| 2026-08-12 | PR #6 | CodeRabbit | errcheck: unchecked `resp.Body.Close()` in new test files | FP | Linter-sourced. Repo runs no errcheck; every existing test file closes bodies bare; a Close error on a read body carries no actionable signal. Declined for convention consistency — defensible as TP-minor under a stricter lint posture. |
+| 2026-08-12 | PR #6 | CodeRabbit | errcheck: unchecked `resp.Body.Close()` in new test files | FP | Linter-sourced. Repo runs no errcheck; every existing test file closes bodies bare; a Close error on a read body carries no actionable signal. Declined for convention consistency — defensible as TP-minor under a stricter lint posture. On decline, the tool agreed, withdrew the finding, and persisted a learning. |
+| 2026-08-12 | PR #6 re-review | CodeRabbit | Cancel tests assert only the canceled marker — they'd pass even if cancellation discarded the captured runner output | TP-minor | Fair test-strength point on code added in the fix round itself. Both service tests now assert the partial output survives. |
+| 2026-08-12 | PR #6 re-review | CodeRabbit | This scorecard's own "7 actionable" phrasing didn't distinguish the FP within the count | TP-minor | Reviewed the eval doc reviewing itself, and the nit was fair; reworded. Same doc-precision class as the PR #4 findings. |
 
 ## Running tally
 
 | Tool | TP | TP-minor | FP | Precision |
 |---|---|---|---|---|
 | CodeAnt | 3 | 1 | 1 | 4/5 |
-| CodeRabbit | 4 | 6 | 1 | 10/11 |
+| CodeRabbit | 4 | 8 | 1 | 12/13 |
 
 Sample size is small; treat the tally as directional until ~10+ findings per tool.
 
@@ -82,7 +84,8 @@ keep the signal usable.
 this answers the depth-vs-noise-at-scale question. Both tools completed
 within ~4 minutes of the PR opening. CodeAnt stayed low-volume and
 high-severity: two findings, both real, no noise — but also no coverage of
-docs, tests-as-spec, or frontend. CodeRabbit went broad (7 actionable): it
+docs, tests-as-spec, or frontend. CodeRabbit went broad (7 findings,
+including 1 FP): it
 converged with CodeAnt on the highest-impact defect and supplied the
 adoptable fix, was the only reviewer — human, agent, or tool — to cross-read
 the design doc against the code, and its one noise finding was
@@ -101,9 +104,23 @@ wider than assessed — the verdict flipped to fix. Two further defects
 internal pass. Lesson: internal review triage decisions on concurrency
 windows deserve adversarial re-derivation, not acceptance by consensus.
 
+**Re-review round (PR #6):** CodeRabbit re-verified each fix against the
+new commits (running its own scripts to confirm the race fix), explicitly
+resolved six threads, and on the reasoned decline of the errcheck finding
+it agreed, withdrew the finding, and stored a repo learning about the
+test-cleanup convention. It also persisted a learning documenting the
+deliberately-accepted residual cancel window with the maintainer's
+rationale — accepted pushback became durable repo context, not a
+re-litigation risk. It then reviewed the fix-round commits themselves and
+produced two further fair findings (one on the eval doc's own wording —
+it reviews the scorecard that scores it). CodeAnt left its status
+unchanged after the fix push and neither resolved nor replied on its two
+threads; its re-review loop remains the weaker half of its offering.
+
 ## Open questions
 
 - Whether CodeAnt supports scoped rule suppression via repo config, and
   whether its repo-scan issues stay in sync as findings are fixed.
-- CodeRabbit thread behavior on a reasoned decline (the errcheck finding):
-  does it resolve, re-litigate, or persist a learning?
+- Whether CodeAnt eventually re-reviews pushed fixes on an open PR (its
+  status comment still names the pre-fix commit) or only reviews once per
+  PR unless prompted.
