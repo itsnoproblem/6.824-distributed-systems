@@ -25,7 +25,7 @@ func adderMeta() *course.CodeMeta {
 }
 
 func TestRunExerciseScaffoldFails(t *testing.T) {
-	out, code, err := exercise.Workspace{}.RunExercise(context.Background(), adderMeta(), nil)
+	out, code, err := exercise.Workspace{}.RunExercise(context.Background(), adderMeta(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestRunExerciseScaffoldFails(t *testing.T) {
 
 func TestRunExerciseDraftOverlayPasses(t *testing.T) {
 	draft := map[string]string{"adder.go": "package adder\n\nfunc Add(a, b int) int { return a + b }\n"}
-	out, code, err := exercise.Workspace{}.RunExercise(context.Background(), adderMeta(), draft)
+	out, code, err := exercise.Workspace{}.RunExercise(context.Background(), adderMeta(), draft, nil)
 	if err != nil || code != 0 {
 		t.Fatalf("fixed draft should pass: code=%d err=%v out=%q", code, err, out)
 	}
@@ -47,7 +47,7 @@ func TestRunExerciseIgnoresNonEditableOverlay(t *testing.T) {
 	draft := map[string]string{
 		"adder_test.go": "package adder\n", // would delete the test
 	}
-	_, code, err := exercise.Workspace{}.RunExercise(context.Background(), adderMeta(), draft)
+	_, code, err := exercise.Workspace{}.RunExercise(context.Background(), adderMeta(), draft, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

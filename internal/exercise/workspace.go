@@ -76,13 +76,16 @@ func (Workspace) Materialize(meta *course.CodeMeta, editable map[string]string) 
 	return buildFiles(meta, editable)
 }
 
-func (w Workspace) RunExercise(ctx context.Context, meta *course.CodeMeta, editable map[string]string) (string, int, error) {
+// RunExercise materializes the workspace and runs the step's test command,
+// forwarding output chunks to sink as they arrive (nil sink allowed).
+func (w Workspace) RunExercise(ctx context.Context, meta *course.CodeMeta,
+	editable map[string]string, sink func(string)) (string, int, error) {
 	dir, cleanup, err := w.materialize(meta, editable)
 	if err != nil {
 		return "", -1, err
 	}
 	defer cleanup()
-	return execx.Run(ctx, dir, meta.Run, meta.Timeout)
+	return execx.Stream(ctx, dir, meta.Run, meta.Timeout, sink)
 }
 
 // diagRe matches gofmt -e and go vet lines: "file.go:12:3: message"
