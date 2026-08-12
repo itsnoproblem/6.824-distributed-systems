@@ -57,6 +57,15 @@ exactly as today.
   overflow so a stalled client can never block the runner goroutine; a
   dropped-chunk marker event tells the client to re-sync on completion.
 
+Implementation notes (two deviations): (1) each service constructs its own
+Broker rather than sharing one instance — the namespaced key scheme is kept
+so brokers could be shared later without collisions, but per-service
+ownership avoids any wiring changes in `cmd/tour` and the e2e harness.
+(2) `Finish()` takes no result and the terminal SSE event carries no
+payload — on `done` the client refetches the server-rendered section, which
+is the single source of truth for outcome display, so duplicating outcome
+data in the event bought nothing.
+
 ### `internal/execx`
 
 New streaming variant alongside the existing buffered API: starts the
