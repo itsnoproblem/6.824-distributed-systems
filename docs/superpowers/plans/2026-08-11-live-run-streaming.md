@@ -448,15 +448,20 @@ git commit -m "feat: runstream broker for live run output fan-out"
 
 ---
 
-### Task 2: `runstream.ServeSSE` — SSE transport helper
+### Task 2: `runstream` SSE writer + shared route registration
 
 **Files:**
 - Create: `internal/runstream/sse.go`
+- Create: `internal/runstream/routes.go`
 - Test: `internal/runstream/sse_test.go`
+- Test: `internal/runstream/routes_test.go`
 
 **Interfaces:**
-- Consumes: `Event`, `EventKind` from Task 1.
-- Produces (used by Tasks 5–6): `func ServeSSE(w http.ResponseWriter, r *http.Request, events <-chan Event)` — writes `text/event-stream` with event names `chunk`/`dropped`/`done`, JSON-encoded string data, `: ping` heartbeat comments, returns when the channel closes / `done` is sent / the client disconnects.
+- Consumes: `Event`, `EventKind` from Task 1; `api.RenderError`, `api.ErrInvalid` from `pkg/api`.
+- Produces (used by Tasks 6–7):
+  - `func ServeSSE(w http.ResponseWriter, r *http.Request, events <-chan Event)` — writes `text/event-stream` with event names `chunk`/`dropped`/`done`, JSON-encoded string data, `: ping` heartbeat comments, returns when the channel closes / `done` is sent / the client disconnects.
+  - `type RunService interface { Watch(ctx context.Context, id int64) (<-chan Event, error); Cancel(ctx context.Context, id int64) error }`
+  - `func RegisterRunRoutes(mux *http.ServeMux, prefix string, svc RunService)` — registers `GET {prefix}/{id}/stream` (SSE) and `POST {prefix}/{id}/cancel` (204 on success); both surfaces share this one implementation.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -532,6 +537,134 @@ func TestServeSSEEndsAfterChannelCloseWithoutDone(t *testing.T) {
 }
 ```
 
+Create `internal/runstream/routes_test.go`:
+
+```go
+package runstream
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
+)
+
+// fakeRunService scripts Watch/Cancel outcomes and records calls.
+type fakeRunService struct {
+	watchEvents []Event
+	watchErr    error
+	cancelErr   error
+	canceledID  int64
+	watchedID   int64
+}
+
+func (f *fakeRunService) Watch(ctx context.Context, id int64) (<-chan Event, error) {
+	f.watchedID = id
+	if f.watchErr != nil {
+		return nil, f.watchErr
+	}
+	ch := make(chan Event, len(f.watchEvents))
+	for _, ev := range f.watchEvents {
+		ch <- ev
+	}
+	close(ch)
+	return ch, nil
+}
+
+func (f *fakeRunService) Cancel(ctx context.Context, id int64) error {
+	f.canceledID = id
+	return f.cancelErr
+}
+
+func newRoutesServer(t *testing.T, svc RunService) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	RegisterRunRoutes(mux, "/things/submissions", svc)
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestRunRoutesStreamServesSSE(t *testing.T) {
+	svc := &fakeRunService{watchEvents: []Event{{Kind: KindChunk, Data: "hi"}, {Kind: KindDone}}}
+	ts := newRoutesServer(t, svc)
+	resp, err := http.Get(ts.URL + "/things/submissions/42/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "event: chunk\ndata: \"hi\"") {
+		t.Fatalf("stream body:\n%s", body)
+	}
+	if svc.watchedID != 42 {
+		t.Fatalf("watched id = %d", svc.watchedID)
+	}
+}
+
+func TestRunRoutesStreamErrors(t *testing.T) {
+	svc := &fakeRunService{watchErr: api.ErrNotFound}
+	ts := newRoutesServer(t, svc)
+	resp, err := http.Get(ts.URL + "/things/submissions/42/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestRunRoutesStreamRejectsBadID(t *testing.T) {
+	ts := newRoutesServer(t, &fakeRunService{})
+	resp, err := http.Get(ts.URL + "/things/submissions/nope/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestRunRoutesCancel(t *testing.T) {
+	svc := &fakeRunService{}
+	ts := newRoutesServer(t, svc)
+	resp, err := http.Post(ts.URL+"/things/submissions/7/cancel", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+	if svc.canceledID != 7 {
+		t.Fatalf("canceled id = %d", svc.canceledID)
+	}
+}
+
+func TestRunRoutesCancelErrors(t *testing.T) {
+	svc := &fakeRunService{cancelErr: errors.Join(api.ErrInvalid, errors.New("no live run"))}
+	ts := newRoutesServer(t, svc)
+	resp, err := http.Post(ts.URL+"/things/submissions/7/cancel", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `go test -race ./internal/runstream/`
@@ -603,6 +736,62 @@ func writeEvent(w io.Writer, ev Event) {
 }
 ```
 
+Create `internal/runstream/routes.go`:
+
+```go
+package runstream
+
+import (
+	"context"
+	"net/http"
+	"strconv"
+
+	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
+)
+
+// RunService is what a service must expose for its runs to be streamed and
+// canceled over HTTP; the eval and exercise services both satisfy it.
+type RunService interface {
+	Watch(ctx context.Context, id int64) (<-chan Event, error)
+	Cancel(ctx context.Context, id int64) error
+}
+
+// RegisterRunRoutes wires the live-run endpoints for one surface under
+// prefix (e.g. "/submissions" or "/exercises/submissions"):
+// GET {prefix}/{id}/stream (SSE) and POST {prefix}/{id}/cancel (204).
+// These bypass the api.Endpoint indirection deliberately: SSE writes a
+// long-lived response and cancel returns no body — neither fits the
+// request→response-model→render shape.
+func RegisterRunRoutes(mux *http.ServeMux, prefix string, svc RunService) {
+	mux.HandleFunc("GET "+prefix+"/{id}/stream", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			api.RenderError(w, r, api.ErrInvalid)
+			return
+		}
+		events, err := svc.Watch(r.Context(), id)
+		if err != nil {
+			api.RenderError(w, r, err)
+			return
+		}
+		ServeSSE(w, r, events)
+	})
+
+	mux.HandleFunc("POST "+prefix+"/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			api.RenderError(w, r, api.ErrInvalid)
+			return
+		}
+		if err := svc.Cancel(r.Context(), id); err != nil {
+			api.RenderError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+```
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `go test -race ./internal/runstream/`
@@ -613,7 +802,7 @@ Expected: PASS
 ```bash
 gofmt -l internal/runstream/
 git add internal/runstream/
-git commit -m "feat: SSE writer for runstream events"
+git commit -m "feat: SSE writer and shared run routes for runstream"
 ```
 
 ---
@@ -1319,7 +1508,7 @@ git commit -m "feat: exercise service streams runs and supports cancel"
 - Test: `templates/viewmodels_test.go` only if it asserts VM field sets; otherwise covered by e2e in Task 8.
 
 **Interfaces:**
-- Consumes: `Service.Watch/Cancel` (Task 4), `runstream.ServeSSE` (Task 2).
+- Consumes: `Service.Watch/Cancel` (Task 4), `runstream.RegisterRunRoutes` (Task 2).
 - Produces:
   - `GET /submissions/{id}/stream` — SSE.
   - `POST /submissions/{id}/cancel` — 204 on success.
@@ -1336,38 +1525,13 @@ In `internal/eval/endpoint.go`, add to `EvalService` (import runstream):
 
 - [ ] **Step 2: Add routes**
 
-In `internal/eval/transport.go` `RegisterRoutes`, after the existing `/submissions/{id}/section` route:
+In `internal/eval/transport.go` `RegisterRoutes`, after the existing `/submissions/{id}/section` route (import runstream):
 
 ```go
-	mux.HandleFunc("GET /submissions/{id}/stream", func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
-			api.RenderError(w, r, api.ErrInvalid)
-			return
-		}
-		events, err := svc.Watch(r.Context(), id)
-		if err != nil {
-			api.RenderError(w, r, err)
-			return
-		}
-		runstream.ServeSSE(w, r, events)
-	})
-
-	mux.HandleFunc("POST /submissions/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
-			api.RenderError(w, r, api.ErrInvalid)
-			return
-		}
-		if err := svc.Cancel(r.Context(), id); err != nil {
-			api.RenderError(w, r, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
+	runstream.RegisterRunRoutes(mux, "/submissions", svc)
 ```
 
-(Streaming and cancel bypass the `api.Endpoint` indirection deliberately: SSE writes a long-lived response, and cancel returns no body — neither fits the request→response-model→render shape.)
+(The handlers themselves live in `runstream.RegisterRunRoutes` — Task 2 — shared with the exercise surface.)
 
 - [ ] **Step 3: View model + templates**
 
@@ -1442,7 +1606,7 @@ git commit -m "feat: SSE stream and cancel endpoints for lab submissions"
 - Modify: `templates/exercise.templ` (`ExerciseStatus` running branch)
 
 **Interfaces:**
-- Consumes: exercise `Service.Watch/Cancel` (Task 5), `runstream.ServeSSE` (Task 2), `RunLive` templ component (Task 6).
+- Consumes: exercise `Service.Watch/Cancel` (Task 5), `runstream.RegisterRunRoutes` (Task 2), `RunLive` templ component (Task 6).
 - Produces:
   - `GET /exercises/submissions/{id}/stream` — SSE.
   - `POST /exercises/submissions/{id}/cancel` — 204 on success.
@@ -1458,7 +1622,11 @@ In `internal/exercise/endpoint.go`, add to the `ExerciseService` interface:
 
 - [ ] **Step 2: Add routes**
 
-In `internal/exercise/transport.go` `RegisterRoutes`, after the `/exercises/submissions/{id}/status` route — same two handlers as Task 6 Step 2 verbatim, with paths `GET /exercises/submissions/{id}/stream` and `POST /exercises/submissions/{id}/cancel` (import runstream).
+In `internal/exercise/transport.go` `RegisterRoutes`, after the `/exercises/submissions/{id}/status` route (import runstream):
+
+```go
+	runstream.RegisterRunRoutes(mux, "/exercises/submissions", svc)
+```
 
 - [ ] **Step 3: View model + template**
 
