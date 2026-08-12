@@ -95,6 +95,27 @@ func TestFinishDeregistersFromBroker(t *testing.T) {
 	}
 }
 
+func TestFinishOfStaleRunDoesNotDeregisterReplacement(t *testing.T) {
+	b := NewBroker()
+	runA := b.Register("lab/9", func() {})
+	runB := b.Register("lab/9", func() {}) // id reused, e.g. on retry; overwrites runA in the broker
+
+	runA.Finish() // finishes late; must not deregister runB
+
+	got, ok := b.Get("lab/9")
+	if !ok {
+		t.Fatal("replacement run was deregistered by stale Finish")
+	}
+	if got != runB {
+		t.Fatal("broker entry for lab/9 is not runB after stale runA.Finish()")
+	}
+
+	runB.Finish() // the real finish must still deregister
+	if _, ok := b.Get("lab/9"); ok {
+		t.Fatal("runB.Finish() did not deregister")
+	}
+}
+
 func TestFinishIsIdempotentAndAppendAfterFinishIsIgnored(t *testing.T) {
 	b := NewBroker()
 	r := b.Register("lab/4", func() {})

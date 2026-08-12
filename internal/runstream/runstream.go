@@ -2,7 +2,9 @@
 // live run keeps an in-memory buffer of output chunks, fans them out to
 // subscribers (replay what's accrued, then tail), and carries the hook that
 // cancels the underlying process. Completed runs deregister; history lives
-// in SQLite, not here.
+// in SQLite, not here. A KindDropped marker is emitted to a subscriber when
+// it has fallen behind the retained window (may occur more than once for a
+// repeatedly-lagging subscriber).
 package runstream
 
 import (
@@ -12,7 +14,8 @@ import (
 
 // maxBuffered caps the bytes of output retained per run. When exceeded the
 // oldest chunks are dropped; a subscriber that lands behind the retained
-// window receives a single KindDropped marker and resumes from what remains.
+// window receives a KindDropped marker and resumes from what remains (may
+// occur more than once for a repeatedly-lagging subscriber).
 const maxBuffered = 256 * 1024
 
 type EventKind int
@@ -59,9 +62,14 @@ func (b *Broker) Get(id string) (*Run, bool) {
 	return r, ok
 }
 
-func (b *Broker) remove(id string) {
+// remove deregisters r only if it is still the entry registered under its
+// id. This guards against a stale run finishing after its id was
+// re-registered (e.g. on retry): the newer run's entry must survive.
+func (b *Broker) remove(r *Run) {
 	b.mu.Lock()
-	delete(b.runs, id)
+	if b.runs[r.id] == r {
+		delete(b.runs, r.id)
+	}
 	b.mu.Unlock()
 }
 
@@ -115,7 +123,7 @@ func (r *Run) Finish() {
 	close(r.wake)
 	r.wake = make(chan struct{})
 	r.mu.Unlock()
-	r.broker.remove(r.id)
+	r.broker.remove(r)
 }
 
 // Cancel marks the run canceled and invokes the registration hook once.
