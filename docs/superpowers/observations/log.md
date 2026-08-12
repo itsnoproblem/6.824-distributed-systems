@@ -69,3 +69,14 @@ the implementer to the planner; review pressure has to move with it.
 **Issue:** Changing the HOST default to loopback broke the documented `docker compose up` flow (Dockerfile sets PORT but not HOST; compose publishes 8080:8080 which can't reach a loopback listener). The regression shipped in the PR and was caught by CodeAnt's PR review, not by the pre-push checklist — the test suite can't see deployment configs.
 **Suggested improvement:** Add a rule: when changing any config default or env-var behavior, grep all deployment surfaces (docker/, compose files, Makefile, README quick-start, CI workflows) for dependence on the old default before pushing.
 **Principle:** Test suites only cover what runs in-process; defaults are a contract with every deployment artifact in the repo, and those artifacts need a manual sweep when the contract changes.
+
+### Observation 5: Piped test commands mask exit codes and break verify-before-push
+
+**Status:** OPEN
+**Date:** 2026-08-12
+**Session context:** Fix round for external review findings on the live-run-streaming PR
+**Target:** superpowers:verification-before-completion (personal skill)
+
+**Issue:** A chained command `go test ./... 2>&1 | tail -3 && git commit && git push` pushed a commit with a failing test: the pipeline's exit status is tail's, not go test's, so the && chain proceeded past a FAIL. The failure was visible in the printed output but the automation keyed off the wrong exit code.
+**Suggested improvement:** When gating commit/push on a test run, never pipe the test command in the same chain — capture with `go test ... > out 2>&1; RC=$?` and gate on $RC (or use pipefail). The skill's checklist should name exit-code masking via pipes as a known way "evidence before assertions" silently breaks.
+**Principle:** Verification gates must consume the verified command's own exit status; any pipe or postprocessing between the command and the gate can convert failure into success.
