@@ -25,3 +25,13 @@ func TestEmbedsExerciseJS(t *testing.T) {
 		t.Fatalf("exercise.js embedded but empty")
 	}
 }
+
+func TestEmbedsRunstreamJS(t *testing.T) {
+	data, err := static.FS.ReadFile("runstream.js")
+	if err != nil {
+		t.Fatalf("runstream.js not embedded: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatalf("runstream.js embedded but empty")
+	}
+}
