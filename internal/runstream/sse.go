@@ -39,13 +39,17 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, events <-chan Event) {
 			if !ok {
 				return
 			}
-			writeEvent(w, ev)
+			if err := writeEvent(w, ev); err != nil {
+				return
+			}
 			f.Flush()
 			if ev.Kind == KindDone {
 				return
 			}
 		case <-heartbeat.C:
-			fmt.Fprint(w, ": ping\n\n")
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
 			f.Flush()
 		case <-r.Context().Done():
 			return
@@ -53,7 +57,8 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, events <-chan Event) {
 	}
 }
 
-func writeEvent(w io.Writer, ev Event) {
+func writeEvent(w io.Writer, ev Event) error {
 	data, _ := json.Marshal(ev.Data) // a string always marshals
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventNames[ev.Kind], data)
+	_, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventNames[ev.Kind], data)
+	return err
 }
