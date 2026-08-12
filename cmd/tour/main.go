@@ -4,9 +4,11 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/config"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
@@ -27,6 +29,17 @@ func newMux() *http.ServeMux {
 		_, _ = w.Write([]byte("ok"))
 	})
 	return mux
+}
+
+// newServer wraps mux in an http.Server with a header-read timeout so a
+// non-loopback deployment isn't left open to Slowloris-style connection
+// exhaustion (CodeAnt CWE-400 finding).
+func newServer(cfg config.Config, mux *http.ServeMux) *http.Server {
+	return &http.Server{
+		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 }
 
 func main() {
@@ -84,6 +97,7 @@ func main() {
 	}
 	exercise.RegisterRoutes(mux, exerciseSvc)
 
-	log.Printf("tour listening on :%s", cfg.Port)
-	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
+	srv := newServer(cfg, mux)
+	log.Printf("tour listening on %s", srv.Addr)
+	log.Fatal(srv.ListenAndServe())
 }

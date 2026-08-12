@@ -11,6 +11,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.Port != "8080" {
 		t.Errorf("Port = %q, want 8080", cfg.Port)
 	}
+	if cfg.Host != "127.0.0.1" {
+		t.Errorf("Host = %q, want 127.0.0.1", cfg.Host)
+	}
 	if cfg.DataDir != "./data" {
 		t.Errorf("DataDir = %q, want ./data", cfg.DataDir)
 	}
@@ -27,11 +30,11 @@ func TestFromEnvDefaults(t *testing.T) {
 
 func TestFromEnvOverrides(t *testing.T) {
 	env := map[string]string{
-		"PORT": "9999", "DATA_DIR": "/d", "CONTENT_DIR": "/c",
+		"PORT": "9999", "HOST": "0.0.0.0", "DATA_DIR": "/d", "CONTENT_DIR": "/c",
 		"LAB_REPO_DIR": "/lab", "OPENROUTER_API_KEY": "sk", "OPENROUTER_MODEL": "x/y",
 	}
 	cfg := config.FromEnv(func(k string) string { return env[k] })
-	if cfg.Port != "9999" || cfg.DataDir != "/d" || cfg.ContentDir != "/c" ||
+	if cfg.Port != "9999" || cfg.Host != "0.0.0.0" || cfg.DataDir != "/d" || cfg.ContentDir != "/c" ||
 		cfg.LabRepoDir != "/lab" || cfg.OpenRouterKey != "sk" || cfg.OpenRouterModel != "x/y" {
 		t.Errorf("overrides not applied: %+v", cfg)
 	}

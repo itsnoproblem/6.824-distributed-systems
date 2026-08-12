@@ -31,6 +31,7 @@ make run    # serves on :8080; state in ./data, content from ./content
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `HOST` | `127.0.0.1` | Bind address; set `0.0.0.0` for hosted deployments (e.g. Cloud Run) |
 | `PORT` | `8080` | HTTP port |
 | `DATA_DIR` | `./data` | SQLite location (`tour.db`) |
 | `CONTENT_DIR` | `./content` | Course content tree |

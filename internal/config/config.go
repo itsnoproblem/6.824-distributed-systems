@@ -2,6 +2,7 @@
 package config
 
 type Config struct {
+	Host            string
 	Port            string
 	DataDir         string
 	ContentDir      string
@@ -19,6 +20,9 @@ func FromEnv(getenv func(string) string) Config {
 		return def
 	}
 	return Config{
+		// Loopback by default: the tour is a local app. Hosted deployments
+		// (e.g. Cloud Run) set HOST=0.0.0.0 to accept external traffic.
+		Host:            get("HOST", "127.0.0.1"),
 		Port:            get("PORT", "8080"),
 		DataDir:         get("DATA_DIR", "./data"),
 		ContentDir:      get("CONTENT_DIR", "./content"),
