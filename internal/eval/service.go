@@ -250,19 +250,22 @@ func (s *Service) evaluateLab(runCtx context.Context, id int64, live *runstream.
 	}
 	_ = s.subs.UpdateSubmission(ctx, id, StatusRunning, "")
 	out, err := s.lab.RunTests(runCtx, step.Eval.Workdir, step.Eval.TestCmd, step.Eval.Timeout, live.Append)
-	live.Finish() // test phase over: release stream subscribers before the LLM phase
 	if live.Canceled() {
 		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\ncanceled by user")
+		live.Finish()
 		return
 	}
 	if err != nil {
 		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\nRUNNER ERROR: "+err.Error())
+		live.Finish()
 		return
 	}
 	if s.llm == nil {
 		_ = s.subs.UpdateSubmission(ctx, id, StatusComplete, out)
+		live.Finish()
 		return
 	}
+	live.Finish() // LLM phase follows; status stays running and the poll fallback covers it
 	var files map[string]string
 	if err := json.Unmarshal([]byte(sub.Content), &files); err != nil {
 		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\nSNAPSHOT DECODE ERROR: "+err.Error())
@@ -361,7 +364,9 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 	if !ok {
 		return fmt.Errorf("%w: submission %d has no live run", api.ErrInvalid, id)
 	}
-	run.Cancel()
+	if !run.Cancel() {
+		return fmt.Errorf("%w: submission %d has no live run", api.ErrInvalid, id)
+	}
 	return nil
 }
 

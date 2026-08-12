@@ -136,13 +136,31 @@ func TestCancelInvokesHookOnceAndSetsFlag(t *testing.T) {
 	if r.Canceled() {
 		t.Fatal("fresh run reports canceled")
 	}
-	r.Cancel()
+	if !r.Cancel() {
+		t.Fatal("first Cancel() returned false, want true")
+	}
 	r.Cancel()
 	if calls != 1 {
 		t.Fatalf("cancel hook ran %d times, want 1", calls)
 	}
 	if !r.Canceled() {
 		t.Fatal("Canceled() false after Cancel()")
+	}
+}
+
+func TestCancelAfterFinishRejected(t *testing.T) {
+	calls := 0
+	b := NewBroker()
+	r := b.Register("lab/10", func() { calls++ })
+	r.Finish()
+	if r.Cancel() {
+		t.Fatal("Cancel() after Finish() returned true, want false")
+	}
+	if calls != 0 {
+		t.Fatalf("cancel hook ran %d times after finish, want 0", calls)
+	}
+	if r.Canceled() {
+		t.Fatal("Canceled() true after a rejected Cancel()")
 	}
 }
 

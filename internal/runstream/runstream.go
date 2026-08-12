@@ -127,11 +127,19 @@ func (r *Run) Finish() {
 }
 
 // Cancel marks the run canceled and invokes the registration hook once.
-func (r *Run) Cancel() {
+// A run that has already finished cannot be canceled: Cancel reports
+// whether the cancellation was accepted, and a rejected Cancel leaves the
+// canceled flag and the hook untouched.
+func (r *Run) Cancel() bool {
 	r.mu.Lock()
+	if r.done {
+		r.mu.Unlock()
+		return false
+	}
 	r.canceled = true
 	r.mu.Unlock()
 	r.cancelOnce.Do(r.cancel)
+	return true
 }
 
 func (r *Run) Canceled() bool {

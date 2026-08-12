@@ -138,23 +138,15 @@ func TestExerciseRunCancelMidRun(t *testing.T) {
 		t.Fatal("stream did not end with done after cancel")
 	}
 
-	// The canceled outcome must be persisted (poll briefly: the pipeline
-	// finishes the row just after the stream closes).
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var status, output string
-		err := a.DB.QueryRow(`SELECT status, test_output FROM submissions WHERE id = ?`, id).
-			Scan(&status, &output)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if status == "failed" && strings.Contains(output, "canceled by user") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("status=%q output=%q — canceled outcome never recorded", status, output)
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Terminal outcomes are persisted before the done event is emitted, so
+	// the canceled outcome must already be recorded — no polling needed.
+	var status, output string
+	if err := a.DB.QueryRow(`SELECT status, test_output FROM submissions WHERE id = ?`, id).
+		Scan(&status, &output); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" || !strings.Contains(output, "canceled by user") {
+		t.Fatalf("status=%q output=%q — canceled outcome not persisted before done", status, output)
 	}
 
 	// Cancel again: run no longer live → 400.
@@ -296,21 +288,15 @@ func TestLabRunCancelMidRun(t *testing.T) {
 		t.Fatal("stream did not end with done after cancel")
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var status, output string
-		err := a.DB.QueryRow(`SELECT status, test_output FROM submissions WHERE id = ?`, id).
-			Scan(&status, &output)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if status == "failed" && strings.Contains(output, "canceled by user") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("status=%q output=%q — canceled outcome never recorded", status, output)
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Terminal outcomes are persisted before the done event is emitted, so
+	// the canceled outcome must already be recorded — no polling needed.
+	var status, output string
+	if err := a.DB.QueryRow(`SELECT status, test_output FROM submissions WHERE id = ?`, id).
+		Scan(&status, &output); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" || !strings.Contains(output, "canceled by user") {
+		t.Fatalf("status=%q output=%q — canceled outcome not persisted before done", status, output)
 	}
 }
 

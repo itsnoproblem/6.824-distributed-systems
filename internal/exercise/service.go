@@ -271,17 +271,18 @@ func (s *Service) evaluate(runCtx context.Context, id int64, live *runstream.Run
 		return
 	}
 	out, code, err := s.runner.RunExercise(runCtx, step.Code, files, live.Append)
-	live.Finish() // test phase over: release stream subscribers before this returns
 	if live.Canceled() {
 		if uerr := s.subs.UpdateSubmission(ctx, id, eval.StatusFailed, out+"\n\ncanceled by user"); uerr != nil {
 			log.Printf("exercise evaluate: update submission %d to failed (canceled): %v", id, uerr)
 		}
+		live.Finish()
 		return
 	}
 	if err != nil {
 		if uerr := s.subs.UpdateSubmission(ctx, id, eval.StatusFailed, out+"\n\nRUNNER ERROR: "+err.Error()); uerr != nil {
 			log.Printf("exercise evaluate: update submission %d to failed (runner error): %v", id, uerr)
 		}
+		live.Finish()
 		return
 	}
 	passed := code == 0
@@ -297,6 +298,7 @@ func (s *Service) evaluate(runCtx context.Context, id int64, live *runstream.Run
 			log.Printf("exercise evaluate: mark %s complete: %v", sub.Ref, err)
 		}
 	}
+	live.Finish() // test phase over: release stream subscribers after all terminal persistence
 }
 
 // Feedback reviews the latest completed run with the LLM. Synchronous —
@@ -384,6 +386,8 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 	if !ok {
 		return fmt.Errorf("%w: submission %d has no live run", api.ErrInvalid, id)
 	}
-	run.Cancel()
+	if !run.Cancel() {
+		return fmt.Errorf("%w: submission %d has no live run", api.ErrInvalid, id)
+	}
 	return nil
 }
