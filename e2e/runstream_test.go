@@ -137,17 +137,30 @@ func TestExerciseRunCancelMidRun(t *testing.T) {
 	stream := getStream(t, a.TS.URL+"/exercises/submissions/"+idStr+"/stream")
 	defer stream.Body.Close()
 
-	cancelResp, err := http.Post(a.TS.URL+"/exercises/submissions/"+idStr+"/cancel", "", nil)
-	if err != nil {
-		t.Fatal(err)
+	// Fire the cancel only once output proves the process is actually
+	// running, rather than racing it against process startup.
+	canceled := false
+	chunks, done := readStream(t, stream.Body, func(c string) bool {
+		if !canceled && strings.Contains(c, "tick 0") {
+			canceled = true
+			resp, err := http.Post(a.TS.URL+"/exercises/submissions/"+idStr+"/cancel", "", nil)
+			if err != nil {
+				t.Errorf("cancel: %v", err)
+				return true
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent {
+				t.Errorf("cancel: status %d", resp.StatusCode)
+				return true
+			}
+		}
+		return false
+	})
+	if !done {
+		t.Fatalf("stream did not end with done after cancel (chunks: %q)", chunks)
 	}
-	cancelResp.Body.Close()
-	if cancelResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("cancel: status %d", cancelResp.StatusCode)
-	}
-
-	if _, done := readStream(t, stream.Body, nil); !done {
-		t.Fatal("stream did not end with done after cancel")
+	if !canceled {
+		t.Fatal("never observed tick 0 to trigger cancel")
 	}
 
 	// Terminal outcomes are persisted before the done event is emitted, so
