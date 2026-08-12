@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/eval"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/runstream"
 	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
 )
 
@@ -36,7 +38,8 @@ type SubmissionRepo interface {
 }
 
 type Runner interface {
-	RunExercise(ctx context.Context, meta *course.CodeMeta, editable map[string]string) (output string, exitCode int, err error)
+	RunExercise(ctx context.Context, meta *course.CodeMeta, editable map[string]string,
+		sink func(string)) (output string, exitCode int, err error)
 	CheckExercise(ctx context.Context, meta *course.CodeMeta, editable map[string]string) ([]Diagnostic, error)
 	// Materialize returns the full workspace file set (generated go.mod +
 	// every scaffold file, with editable files overlaid) without touching
@@ -54,6 +57,7 @@ type Service struct {
 	rubric   eval.Rubric
 	runAsync func(func())
 	now      func() time.Time
+	broker   *runstream.Broker
 }
 
 type Option func(*Service)
@@ -74,6 +78,7 @@ func NewService(c CourseRepo, d DraftRepo, subs SubmissionRepo, p ProgressMarker
 		course: c, drafts: d, subs: subs, progress: p, runner: r,
 		llm: llm, rubric: rubric,
 		runAsync: func(f func()) { go f() }, now: time.Now,
+		broker: runstream.NewBroker(),
 	}
 	for _, o := range opts {
 		o(s)
@@ -135,6 +140,9 @@ func (s *Service) State(ctx context.Context, ref course.StepRef) (View, error) {
 	if view.Submission != nil {
 		if view.Evaluation, err = s.subs.EvaluationForSubmission(ctx, view.Submission.ID); err != nil {
 			return View{}, err
+		}
+		if view.Submission.Status == eval.StatusPending || view.Submission.Status == eval.StatusRunning {
+			_, view.Live = s.broker.Get(runKey(view.Submission.ID))
 		}
 	}
 	return view, nil
@@ -207,15 +215,32 @@ func (s *Service) Run(ctx context.Context, ref course.StepRef) error {
 	if err != nil {
 		return err
 	}
-	s.runAsync(func() { s.evaluate(id) })
+	s.startRun(id)
 	return nil
+}
+
+func runKey(id int64) string { return "exercise/" + strconv.FormatInt(id, 10) }
+
+// startRun registers the live run BEFORE scheduling the pipeline goroutine,
+// so a Watch/Cancel arriving right after the Run response always finds it.
+func (s *Service) startRun(id int64) {
+	runCtx, cancel := context.WithCancel(context.Background())
+	live := s.broker.Register(runKey(id), cancel)
+	s.runAsync(func() {
+		defer cancel()
+		s.evaluate(runCtx, id, live)
+	})
 }
 
 // evaluate runs in the background; every failure lands on the submission
 // row. Persistence failures along the way are logged rather than silently
 // discarded — they can't be returned (there is no caller left to hear
-// about them), but they must be observable.
-func (s *Service) evaluate(id int64) {
+// about them), but they must be observable. Persistence always uses a fresh
+// background context (it must survive after runCtx is canceled by Cancel or
+// by startRun's deferred cancel on exit); only the test run itself is bound
+// to runCtx, so a cancel actually stops the subprocess.
+func (s *Service) evaluate(runCtx context.Context, id int64, live *runstream.Run) {
+	defer live.Finish() // idempotent; releases subscribers on every exit path
 	ctx := context.Background()
 	sub, err := s.subs.GetSubmission(ctx, id)
 	if err != nil {
@@ -245,11 +270,19 @@ func (s *Service) evaluate(id int64) {
 		}
 		return
 	}
-	out, code, err := s.runner.RunExercise(ctx, step.Code, files)
+	out, code, err := s.runner.RunExercise(runCtx, step.Code, files, live.Append)
+	if live.Canceled() {
+		if uerr := s.subs.UpdateSubmission(ctx, id, eval.StatusFailed, out+"\n\ncanceled by user"); uerr != nil {
+			log.Printf("exercise evaluate: update submission %d to failed (canceled): %v", id, uerr)
+		}
+		live.Finish()
+		return
+	}
 	if err != nil {
 		if uerr := s.subs.UpdateSubmission(ctx, id, eval.StatusFailed, out+"\n\nRUNNER ERROR: "+err.Error()); uerr != nil {
 			log.Printf("exercise evaluate: update submission %d to failed (runner error): %v", id, uerr)
 		}
+		live.Finish()
 		return
 	}
 	passed := code == 0
@@ -265,6 +298,7 @@ func (s *Service) evaluate(id int64) {
 			log.Printf("exercise evaluate: mark %s complete: %v", sub.Ref, err)
 		}
 	}
+	live.Finish() // test phase over: release stream subscribers after all terminal persistence
 }
 
 // Feedback reviews the latest completed run with the LLM. Synchronous —
@@ -323,4 +357,37 @@ func (s *Service) RefForSubmission(ctx context.Context, id int64) (course.StepRe
 		return course.StepRef{}, fmt.Errorf("%w: submission %d", api.ErrNotFound, id)
 	}
 	return sub.Ref, nil
+}
+
+// Watch subscribes to the live output of a submission's run. For a
+// submission with no live run (finished or interrupted) it synthesizes an
+// immediate done event so late connections degrade gracefully instead of
+// erroring.
+func (s *Service) Watch(ctx context.Context, id int64) (<-chan runstream.Event, error) {
+	if _, err := s.subs.GetSubmission(ctx, id); err != nil {
+		return nil, fmt.Errorf("%w: submission %d", api.ErrNotFound, id)
+	}
+	if run, ok := s.broker.Get(runKey(id)); ok {
+		return run.Subscribe(ctx), nil
+	}
+	ch := make(chan runstream.Event, 1)
+	ch <- runstream.Event{Kind: runstream.KindDone}
+	close(ch)
+	return ch, nil
+}
+
+// Cancel kills the live run for a submission. Only the test-execution phase
+// is cancelable; afterwards the run is no longer live and this rejects.
+func (s *Service) Cancel(ctx context.Context, id int64) error {
+	if _, err := s.subs.GetSubmission(ctx, id); err != nil {
+		return fmt.Errorf("%w: submission %d", api.ErrNotFound, id)
+	}
+	run, ok := s.broker.Get(runKey(id))
+	if !ok {
+		return fmt.Errorf("%w: submission %d has no live run", api.ErrInvalid, id)
+	}
+	if !run.Cancel() {
+		return fmt.Errorf("%w: submission %d has no live run", api.ErrInvalid, id)
+	}
+	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/runstream"
 	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
 	"github.com/itsnoproblem/mit-distributed-systems/templates"
 )
@@ -106,6 +107,8 @@ func RegisterRoutes(mux *http.ServeMux, svc ExerciseService) {
 		resp, err := status(r.Context(), id)
 		renderStatus(w, r, resp, err)
 	})
+
+	runstream.RegisterRunRoutes(mux, "/exercises/submissions", svc)
 }
 
 func exerciseVM(ref course.StepRef, v View, feedbackEnabled bool) templates.ExerciseVM {
@@ -130,6 +133,7 @@ func exerciseVM(ref course.StepRef, v View, feedbackEnabled bool) templates.Exer
 		vm.Status = string(v.Submission.Status)
 		vm.Output = v.Submission.TestOutput
 		vm.SubmissionID = v.Submission.ID
+		vm.Live = v.Live
 		if v.Submission.Passed != nil {
 			vm.Passed = *v.Submission.Passed
 		}

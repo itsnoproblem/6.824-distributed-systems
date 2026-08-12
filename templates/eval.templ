@@ -87,10 +87,15 @@ templ LabSection(v EvalSectionVM) {
 			</p>
 		}
 		if v.Status == "pending" || v.Status == "running" {
-			<div hx-get={ fmt.Sprintf("/submissions/%d/section", v.SubmissionID) }
-				hx-trigger="every 3s" hx-target="#eval-section" hx-swap="innerHTML">
-				<p>⏳ Evaluation running — lab tests can take several minutes.</p>
-			</div>
+			if v.Live {
+				@RunLive(fmt.Sprintf("/submissions/%d", v.SubmissionID),
+					fmt.Sprintf("/submissions/%d/section", v.SubmissionID), "#eval-section")
+			} else {
+				<div hx-get={ fmt.Sprintf("/submissions/%d/section", v.SubmissionID) }
+					hx-trigger="every 3s" hx-target="#eval-section" hx-swap="innerHTML">
+					<p>⏳ Evaluation running — lab tests can take several minutes.</p>
+				</div>
+			}
 		} else {
 			<form hx-post={ "/modules/" + v.ModuleSlug + "/steps/" + v.StepSlug + "/submit-lab" }
 				hx-target="#eval-section" hx-swap="innerHTML">

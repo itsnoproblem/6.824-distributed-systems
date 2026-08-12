@@ -3,6 +3,7 @@ package eval_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,9 +12,13 @@ import (
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/coursefs"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/eval"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/runstream"
 	"github.com/itsnoproblem/mit-distributed-systems/internal/sqlite"
 	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
 )
+
+// labRef is the fixture course's submittable lab step.
+var labRef = course.StepRef{Module: "m2", Step: "lab1"}
 
 func TestLoadRubric(t *testing.T) {
 	r, err := eval.LoadRubric("../../content/rubric/question.md")
@@ -40,21 +45,57 @@ func fixtureCourse() *course.Course {
 	}}
 }
 
-// stubLabRepo is a minimal eval.LabRepo: Snapshot always succeeds, and
-// RunTests fails once before succeeding, so tests can drive a submission
-// through StatusFailed and back via Retry.
-type stubLabRepo struct{ runCalls int }
+// stubLabRepo is eval.LabRepo for tests. Snapshot returns files, or a
+// default single-file map when files is unset. RunTests either runs the
+// legacy fail-once-then-succeed script (legacyFailOnce, used by the
+// retry-flow test below) or emits chunks through sink and returns out/err —
+// blocking on release if set, until release closes or ctx is canceled — and
+// signaling started (if set) once it begins. This lets streaming/cancel
+// tests drive a real goroutine while the retry test keeps its simple flow.
+type stubLabRepo struct {
+	legacyFailOnce bool
+	runCalls       int
+
+	files   map[string]string
+	chunks  []string
+	out     string
+	err     error
+	release chan struct{}
+	started chan struct{}
+}
 
 func (s *stubLabRepo) Snapshot(_ string, _ []string) (map[string]string, error) {
+	if s.files != nil {
+		return s.files, nil
+	}
 	return map[string]string{"src/x/x.go": "package x"}, nil
 }
 
-func (s *stubLabRepo) RunTests(_ context.Context, _ string, _ []string, _ time.Duration) (string, error) {
+func (s *stubLabRepo) RunTests(ctx context.Context, _ string, _ []string,
+	_ time.Duration, sink func(string)) (string, error) {
 	s.runCalls++
-	if s.runCalls == 1 {
-		return "", errors.New("boom")
+	if s.legacyFailOnce {
+		if s.runCalls == 1 {
+			return "", errors.New("boom")
+		}
+		return "PASS ok", nil
 	}
-	return "PASS ok", nil
+	if s.started != nil {
+		close(s.started)
+	}
+	for _, c := range s.chunks {
+		if sink != nil {
+			sink(c)
+		}
+	}
+	if s.release != nil {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return s.out, fmt.Errorf("run canceled: %w", ctx.Err())
+		}
+	}
+	return s.out, s.err
 }
 
 type testEnv struct {
@@ -68,7 +109,11 @@ func newEnv(t *testing.T, llm eval.LLM) testEnv {
 	return newEnvWithLab(t, llm, nil)
 }
 
-func newEnvWithLab(t *testing.T, llm eval.LLM, lab eval.LabRepo) testEnv {
+// newEnvWithLab builds a Service backed by real (temp-file) sqlite repos.
+// By default the async lab pipeline runs synchronously (inline); pass
+// eval.WithRunAsync(func(f func()) { go f() }) to run it on a real
+// goroutine, as the streaming/cancel tests need.
+func newEnvWithLab(t *testing.T, llm eval.LLM, lab eval.LabRepo, opts ...eval.Option) testEnv {
 	t.Helper()
 	db, err := sqlite.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -80,12 +125,36 @@ func newEnvWithLab(t *testing.T, llm eval.LLM, lab eval.LabRepo) testEnv {
 	}
 	progress := sqlite.NewProgressRepo(db)
 	subs := sqlite.NewSubmissionRepo(db)
+	allOpts := append([]eval.Option{eval.WithRunAsync(func(f func()) { f() })}, opts...)
 	svc, err := eval.NewService(coursefs.NewRepo(fixtureCourse()), subs, progress, llm, lab,
-		"../../content", eval.WithRunAsync(func(f func()) { f() }))
+		"../../content", allOpts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return testEnv{svc: svc, progress: progress, subs: subs}
+}
+
+// latestSubmissionID reads back the id of the most recent submission for ref.
+func latestSubmissionID(t *testing.T, env testEnv, ref course.StepRef) int64 {
+	t.Helper()
+	sub, err := env.subs.LatestForStep(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub == nil {
+		t.Fatal("latestSubmissionID: no submission found")
+	}
+	return sub.ID
+}
+
+// getSubmission reads back a submission row by id.
+func getSubmission(t *testing.T, env testEnv, id int64) eval.Submission {
+	t.Helper()
+	sub, err := env.subs.GetSubmission(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sub
 }
 
 func TestSubmitAnswerLocked(t *testing.T) {
@@ -160,7 +229,7 @@ func TestSubmitAnswerValidates(t *testing.T) {
 // runner error, and re-running the test runner alone can resolve it, so
 // Retry must work for labs even with a nil LLM.
 func TestLockedModeLabRetry(t *testing.T) {
-	lab := &stubLabRepo{}
+	lab := &stubLabRepo{legacyFailOnce: true}
 	env := newEnvWithLab(t, nil, lab)
 	ctx := context.Background()
 	ref := course.StepRef{Module: "m2", Step: "lab1"}
@@ -209,5 +278,169 @@ func TestLockedModeQuestionRetryRejected(t *testing.T) {
 
 	if err := env.svc.Retry(ctx, id); !errors.Is(err, api.ErrInvalid) {
 		t.Fatalf("Retry err = %v, want ErrInvalid", err)
+	}
+}
+
+// TestSubmitLabStreamsChunksToWatcher verifies startLabRun registers with
+// the broker before the pipeline goroutine runs: Watch, called right after
+// SubmitLab returns, must find the run live and see its chunks.
+func TestSubmitLabStreamsChunksToWatcher(t *testing.T) {
+	lab := &stubLabRepo{
+		chunks:  []string{"chunk-1\n", "chunk-2\n"},
+		out:     "chunk-1\nchunk-2\n",
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	env := newEnvWithLab(t, nil, lab, eval.WithRunAsync(func(f func()) { go f() }))
+	ctx := context.Background()
+
+	if err := env.svc.SubmitLab(ctx, labRef); err != nil {
+		t.Fatal(err)
+	}
+	id := latestSubmissionID(t, env, labRef)
+
+	events, err := env.svc.Watch(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-lab.started
+	close(lab.release)
+
+	var got []string
+	for ev := range events {
+		if ev.Kind == runstream.KindChunk {
+			got = append(got, ev.Data)
+		}
+	}
+	if strings.Join(got, "") != "chunk-1\nchunk-2\n" {
+		t.Fatalf("watched chunks = %q", got)
+	}
+}
+
+// TestCancelLabRunRecordsCanceledOutcome: a canceled run must record
+// StatusFailed with output ending in the "canceled by user" marker, not a
+// new status value.
+func TestCancelLabRunRecordsCanceledOutcome(t *testing.T) {
+	lab := &stubLabRepo{
+		chunks:  []string{"partial\n"},
+		out:     "partial\n",
+		release: make(chan struct{}), // never closed: only cancel ends the run
+		started: make(chan struct{}),
+	}
+	env := newEnvWithLab(t, nil, lab, eval.WithRunAsync(func(f func()) { go f() }))
+	ctx := context.Background()
+
+	if err := env.svc.SubmitLab(ctx, labRef); err != nil {
+		t.Fatal(err)
+	}
+	id := latestSubmissionID(t, env, labRef)
+	<-lab.started
+
+	events, err := env.svc.Watch(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.svc.Cancel(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	for range events { // drain to KindDone/close: the run has fully finished
+	}
+	sub := getSubmission(t, env, id)
+	if sub.Status != eval.StatusFailed {
+		t.Fatalf("status = %s, want failed", sub.Status)
+	}
+	if !strings.Contains(sub.TestOutput, "canceled by user") {
+		t.Fatalf("output %q missing canceled marker", sub.TestOutput)
+	}
+	if !strings.Contains(sub.TestOutput, "partial\n") {
+		t.Fatalf("output %q lost the runner output captured before cancel", sub.TestOutput)
+	}
+}
+
+// TestCancelWithoutLiveRunIsInvalid: once a submission has finished (the
+// normal synchronous path here), it's no longer live and Cancel rejects.
+func TestCancelWithoutLiveRunIsInvalid(t *testing.T) {
+	env := newEnvWithLab(t, nil, &stubLabRepo{out: "ok"})
+	ctx := context.Background()
+
+	if err := env.svc.SubmitLab(ctx, labRef); err != nil {
+		t.Fatal(err)
+	}
+	id := latestSubmissionID(t, env, labRef)
+
+	if err := env.svc.Cancel(ctx, id); !errors.Is(err, api.ErrInvalid) {
+		t.Fatalf("err = %v, want ErrInvalid", err)
+	}
+}
+
+// TestWatchFinishedRunSynthesizesDone: a submission with no live run (e.g.
+// already complete) must degrade to an immediate KindDone rather than error.
+func TestWatchFinishedRunSynthesizesDone(t *testing.T) {
+	env := newEnvWithLab(t, nil, &stubLabRepo{out: "ok"})
+	ctx := context.Background()
+
+	if err := env.svc.SubmitLab(ctx, labRef); err != nil {
+		t.Fatal(err)
+	}
+	id := latestSubmissionID(t, env, labRef)
+
+	events, err := env.svc.Watch(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := <-events
+	if !ok || ev.Kind != runstream.KindDone {
+		t.Fatalf("got %+v ok=%v, want immediate KindDone", ev, ok)
+	}
+}
+
+// TestWatchUnknownSubmissionNotFound: Watch on an id with no submission row
+// at all must be ErrNotFound, distinct from the "finished" synthesized case.
+func TestWatchUnknownSubmissionNotFound(t *testing.T) {
+	env := newEnvWithLab(t, nil, &stubLabRepo{})
+	if _, err := env.svc.Watch(context.Background(), 9999); !errors.Is(err, api.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestStepStateLiveFlag: Live must be true only while the latest
+// submission's run is actually registered in the broker.
+func TestStepStateLiveFlag(t *testing.T) {
+	lab := &stubLabRepo{
+		out:     "ok",
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	env := newEnvWithLab(t, nil, lab, eval.WithRunAsync(func(f func()) { go f() }))
+	ctx := context.Background()
+
+	if err := env.svc.SubmitLab(ctx, labRef); err != nil {
+		t.Fatal(err)
+	}
+	<-lab.started
+
+	view, err := env.svc.StepState(ctx, labRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Live {
+		t.Fatal("running registered lab should be Live")
+	}
+
+	close(lab.release)
+	id := latestSubmissionID(t, env, labRef)
+	events, err := env.svc.Watch(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range events {
+	}
+
+	view, err = env.svc.StepState(ctx, labRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Live {
+		t.Fatal("finished run must not be Live")
 	}
 }

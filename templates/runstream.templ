@@ -1,0 +1,20 @@
+package templates
+
+// RunLive renders the live-output pane for an in-flight test run. base is
+// the submission URL prefix (e.g. "/submissions/42"); sectionURL is fetched
+// into target once the run finishes. runstream.js binds the behavior and is
+// idempotent across htmx swaps.
+templ RunLive(base string, sectionURL string, target string) {
+	<div
+		class="run-live"
+		data-stream-url={ base + "/stream" }
+		data-cancel-url={ base + "/cancel" }
+		data-section-url={ sectionURL }
+		data-target={ target }
+	>
+		<p class="run-live-status">⏳ Tests running — output streams below.</p>
+		<pre class="test-output run-live-output"></pre>
+		<button class="btn danger run-live-cancel" type="button">Cancel run</button>
+	</div>
+	<script src="/static/runstream.js"></script>
+}

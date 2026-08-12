@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/runstream"
 	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
 )
 
@@ -16,6 +17,8 @@ type EvalService interface {
 	SubmitLab(ctx context.Context, ref course.StepRef) error
 	Retry(ctx context.Context, id int64) error
 	RefForSubmission(ctx context.Context, id int64) (course.StepRef, error)
+	Watch(ctx context.Context, id int64) (<-chan runstream.Event, error)
+	Cancel(ctx context.Context, id int64) error
 }
 
 type SectionRequest struct{ Module, Step string }

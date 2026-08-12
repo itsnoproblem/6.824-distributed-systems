@@ -30,10 +30,15 @@ templ ExerciseSection(v ExerciseVM) {
 
 templ ExerciseStatus(v ExerciseVM) {
 	if v.Status == "pending" || v.Status == "running" {
-		<div hx-get={ fmt.Sprintf("/exercises/submissions/%d/status", v.SubmissionID) }
-			hx-trigger="every 1s" hx-target="#exercise-status" hx-swap="innerHTML">
-			<p>⏳ Running tests…</p>
-		</div>
+		if v.Live {
+			@RunLive(fmt.Sprintf("/exercises/submissions/%d", v.SubmissionID),
+				fmt.Sprintf("/exercises/submissions/%d/status", v.SubmissionID), "#exercise-status")
+		} else {
+			<div hx-get={ fmt.Sprintf("/exercises/submissions/%d/status", v.SubmissionID) }
+				hx-trigger="every 1s" hx-target="#exercise-status" hx-swap="innerHTML">
+				<p>⏳ Running tests…</p>
+			</div>
+		}
 	}
 	if v.Status == "complete" && v.Passed {
 		<p class="saved">✓ Tests pass — step complete.</p>

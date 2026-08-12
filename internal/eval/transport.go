@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/runstream"
 	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
 	"github.com/itsnoproblem/mit-distributed-systems/templates"
 )
@@ -66,6 +67,8 @@ func RegisterRoutes(mux *http.ServeMux, svc EvalService) {
 		resp, err := bySubmission(r.Context(), id)
 		renderSection(w, r, resp, err)
 	})
+
+	runstream.RegisterRunRoutes(mux, "/submissions", svc)
 }
 
 func sectionVM(ref course.StepRef, v StepEvalView) templates.EvalSectionVM {
@@ -73,6 +76,7 @@ func sectionVM(ref course.StepRef, v StepEvalView) templates.EvalSectionVM {
 		ModuleSlug: ref.Module, StepSlug: ref.Step,
 		Type: string(v.Step.Type), Enabled: v.Enabled, Question: v.Step.Question,
 	}
+	vm.Live = v.Live
 	if v.Submission != nil {
 		vm.SubmissionID = v.Submission.ID
 		vm.Status = string(v.Submission.Status)

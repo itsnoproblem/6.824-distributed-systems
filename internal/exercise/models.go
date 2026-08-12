@@ -31,4 +31,5 @@ type View struct {
 	HasDraft   bool
 	Submission *eval.Submission // latest exercise run, nil if none
 	Evaluation *eval.Evaluation // LLM feedback on the latest submission, nil if none
+	Live       bool             // a run for the latest submission is streaming right now
 }

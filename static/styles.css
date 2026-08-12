@@ -63,3 +63,12 @@ textarea { width: 100%; font: inherit; padding: .5rem; border: 1px solid #ccc; b
 .save-error { font-size: .82rem; color: #b00020; background: #fdecea; padding: .4rem .6rem;
   border-radius: 4px; margin: .5rem 0 0; }
 .footer { margin-top: 3rem; font-size: .8rem; color: #888; }
+/* Live run streaming pane */
+.run-live-output {
+  min-height: 6em;
+  max-height: 24em;
+  overflow-y: auto;
+}
+.run-live-status {
+  font-weight: 600;
+}

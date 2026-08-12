@@ -51,6 +51,10 @@ feedback:
   against `content/rubric/lab.md` plus the per-lab guidance in
   `content/guidance/`.
 
+Lab and exercise test runs stream their output to the page live as tests
+execute, and an in-flight run can be canceled; a canceled run is recorded
+as failed and can be retried.
+
 Without a key everything still works — answers and code snapshots are
 saved; only the LLM review is locked. Rubrics are versioned; each stored
 evaluation records the rubric version it used.

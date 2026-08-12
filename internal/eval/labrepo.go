@@ -40,10 +40,12 @@ func (l FSLabRepo) Snapshot(workdir string, globs []string) (map[string]string, 
 	return out, nil
 }
 
-// RunTests executes the step's test command in the lab repo via execx: test
-// failures are findings (non-zero exit ⇒ nil error); timeouts and failures
-// to execute return err.
-func (l FSLabRepo) RunTests(ctx context.Context, workdir string, cmd []string, timeout time.Duration) (string, error) {
-	out, _, err := execx.Run(ctx, filepath.Join(l.Dir, workdir), cmd, timeout)
+// RunTests executes the step's test command in the lab repo via execx,
+// forwarding output chunks to sink as they arrive (nil sink allowed): test
+// failures are findings (non-zero exit ⇒ nil error); timeouts, cancelation,
+// and failures to execute return err.
+func (l FSLabRepo) RunTests(ctx context.Context, workdir string, cmd []string,
+	timeout time.Duration, sink func(string)) (string, error) {
+	out, _, err := execx.Stream(ctx, filepath.Join(l.Dir, workdir), cmd, timeout, sink)
 	return out, err
 }

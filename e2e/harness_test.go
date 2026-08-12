@@ -23,6 +23,7 @@ type options struct {
 	ContentDir string       // defaults to e2e/testdata/content
 	LLM        eval.LLM     // nil = locked mode
 	Lab        eval.LabRepo // nil until a test needs lab submission
+	AsyncRuns  bool         // false = synchronous (tests see final state); true = real async (streaming tests watch mid-run)
 }
 
 type app struct {
@@ -60,9 +61,14 @@ func newApp(t *testing.T, o options) *app {
 	}
 	tour.RegisterAttribution(mux, attributionHTML)
 
+	runAsync := func(f func()) { f() } // synchronous: tests see final state
+	if o.AsyncRuns {
+		runAsync = func(f func()) { go f() } // real async: streaming tests watch mid-run
+	}
+
 	evalSvc, err := eval.NewService(courseRepo, subsRepo,
 		progressRepo, o.LLM, o.Lab, o.ContentDir,
-		eval.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state
+		eval.WithRunAsync(runAsync))
 	if err != nil {
 		t.Fatalf("eval service: %v", err)
 	}
@@ -73,7 +79,7 @@ func newApp(t *testing.T, o options) *app {
 
 	exerciseSvc, err := exercise.NewService(courseRepo, sqlite.NewDraftsRepo(db),
 		subsRepo, progressRepo, exercise.Workspace{}, o.LLM, o.ContentDir,
-		exercise.WithRunAsync(func(f func()) { f() })) // synchronous: tests see final state
+		exercise.WithRunAsync(runAsync))
 	if err != nil {
 		t.Fatalf("exercise service: %v", err)
 	}

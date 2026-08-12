@@ -79,6 +79,7 @@ type EvalSectionVM struct {
 	SubmissionID         int64
 	TestOutput           string
 	Report               *ReportVM
+	Live                 bool
 }
 
 type ExerciseFileVM struct {
@@ -98,6 +99,7 @@ type ExerciseVM struct {
 	Output               string
 	SubmissionID         int64
 	FeedbackEnabled      bool
+	Live                 bool
 	Report               *ReportVM
 }
 
