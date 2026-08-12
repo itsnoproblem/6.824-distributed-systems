@@ -29,9 +29,27 @@ func latestSubmissionID(t *testing.T, a *app, module, step string) int64 {
 	return id
 }
 
-// readStream consumes an SSE response until a done event, the predicate
-// says stop, or the deadline passes. Returns concatenated chunk payloads
-// and whether done was seen.
+// getStream issues a stream GET whose context expires after 30s, so a
+// regression that stops the stream mid-run fails the test instead of
+// hanging the suite.
+func getStream(t *testing.T, url string) *http.Response {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+// readStream consumes an SSE response until a done event or the predicate
+// says stop; the caller bounds the read via the request context (see
+// getStream). Returns concatenated chunk payloads and whether done was seen.
 func readStream(t *testing.T, body io.Reader, stopAfter func(chunks string) bool) (string, bool) {
 	t.Helper()
 	var chunks strings.Builder
@@ -87,10 +105,7 @@ func TestExerciseRunStreamsLiveOutput(t *testing.T) {
 		t.Fatalf("running exercise section lacks live pane:\n%s", pageBody)
 	}
 
-	stream, err := http.Get(a.TS.URL + "/exercises/submissions/" + strconvItoa(id) + "/stream")
-	if err != nil {
-		t.Fatal(err)
-	}
+	stream := getStream(t, a.TS.URL+"/exercises/submissions/"+strconvItoa(id)+"/stream")
 	defer stream.Body.Close()
 	if ct := stream.Header.Get("Content-Type"); ct != "text/event-stream" {
 		t.Fatalf("Content-Type = %q", ct)
@@ -119,10 +134,7 @@ func TestExerciseRunCancelMidRun(t *testing.T) {
 	id := latestSubmissionID(t, a, "03-test-code", "02-slow")
 	idStr := strconvItoa(id)
 
-	stream, err := http.Get(a.TS.URL + "/exercises/submissions/" + idStr + "/stream")
-	if err != nil {
-		t.Fatal(err)
-	}
+	stream := getStream(t, a.TS.URL+"/exercises/submissions/"+idStr+"/stream")
 	defer stream.Body.Close()
 
 	cancelResp, err := http.Post(a.TS.URL+"/exercises/submissions/"+idStr+"/cancel", "", nil)
@@ -169,10 +181,7 @@ func TestStreamFinishedRunYieldsImmediateDone(t *testing.T) {
 	resp.Body.Close()
 	id := latestSubmissionID(t, a, "03-test-code", "01-fix")
 
-	stream, err := http.Get(a.TS.URL + "/exercises/submissions/" + strconvItoa(id) + "/stream")
-	if err != nil {
-		t.Fatal(err)
-	}
+	stream := getStream(t, a.TS.URL+"/exercises/submissions/"+strconvItoa(id)+"/stream")
 	defer stream.Body.Close()
 	if _, done := readStream(t, stream.Body, nil); !done {
 		t.Fatal("finished run must synthesize an immediate done event")
@@ -181,10 +190,7 @@ func TestStreamFinishedRunYieldsImmediateDone(t *testing.T) {
 
 func TestStreamUnknownSubmission404(t *testing.T) {
 	a := newApp(t, options{})
-	resp, err := http.Get(a.TS.URL + "/exercises/submissions/99999/stream")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := getStream(t, a.TS.URL+"/exercises/submissions/99999/stream")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status %d, want 404", resp.StatusCode)
@@ -237,10 +243,7 @@ func TestLabRunStreamsLiveOutput(t *testing.T) {
 	}
 	id := latestSubmissionID(t, a, "02-test-lab", "01-submit")
 
-	stream, err := http.Get(a.TS.URL + "/submissions/" + strconvItoa(id) + "/stream")
-	if err != nil {
-		t.Fatal(err)
-	}
+	stream := getStream(t, a.TS.URL+"/submissions/"+strconvItoa(id)+"/stream")
 	defer stream.Body.Close()
 
 	<-lab.started
@@ -267,10 +270,7 @@ func TestLabRunCancelMidRun(t *testing.T) {
 	id := latestSubmissionID(t, a, "02-test-lab", "01-submit")
 	idStr := strconvItoa(id)
 
-	stream, err := http.Get(a.TS.URL + "/submissions/" + idStr + "/stream")
-	if err != nil {
-		t.Fatal(err)
-	}
+	stream := getStream(t, a.TS.URL+"/submissions/"+idStr+"/stream")
 	defer stream.Body.Close()
 
 	<-lab.started
