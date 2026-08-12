@@ -7,27 +7,9 @@ potential improvement to a skill, rule, or workflow.
 
 ---
 
-### Observation 1: Committed docs must be self-contained and name-free
-
-**Status:** ACTIONED
-**Date:** 2026-08-01
-**Session context:** Writing the course-tour design spec during project brainstorming
-**Target:** auto-memory (written: doc-hygiene-no-names-no-orphan-labels.md)
-
-**Issue:** The first version of the design spec included the user's personal
-name ("brainstorming session with…", audience row) and a conversation-scoped
-label ("Approach B") whose alternatives were never described in the doc
-itself. The user corrected both in one message.
-**Suggested improvement:** Before committing any doc, sweep for personal
-names and for labels/references that only made sense in the conversation
-that produced the doc; either describe choices self-containedly or summarize
-the rejected alternatives inline.
-**Principle:** Docs outlive the session that wrote them — a reader has the
-repo, not the chat.
-
 ### Observation 2: Plan example code ships real bugs — treat it as draft, not gospel
 
-**Status:** OPEN
+**Status:** ACTIONED (2026-08-11 — feedback memory `plan-example-code-is-draft.md` written to auto-memory)
 **Date:** 2026-08-03
 **Session context:** v1 course-tour build via subagent-driven development
 **Target:** auto-memory (feedback memory on plan authoring), pending user decision
@@ -50,7 +32,7 @@ the implementer to the planner; review pressure has to move with it.
 
 ### Observation 3: Fix-wave subagent escaped its worktree and committed to main
 
-**Status:** OPEN
+**Status:** ACTIONED (2026-08-11 — covered by auto-memory `subagent-git-commit-guard.md`)
 **Date:** 2026-08-03
 **Session context:** interactive exercises v2, subagent-driven development; final-review fix wave (trivial README/gofmt/frontmatter edits) dispatched to a cheap-tier subagent
 **Target:** auto-memory (dispatch-prompt hygiene for subagent-driven development)
@@ -61,7 +43,7 @@ the implementer to the planner; review pressure has to move with it.
 
 ### Observation 4: Default-change PRs must sweep every deployment surface
 
-**Status:** OPEN
+**Status:** ACTIONED (2026-08-11 — rule added to project CLAUDE.md)
 **Date:** 2026-08-11
 **Session context:** CodeAnt/CodeRabbit tool evaluation; PR #3 changed the server bind default to 127.0.0.1
 **Target:** project CLAUDE.md
