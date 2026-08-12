@@ -452,7 +452,7 @@ func TestCancelExerciseRunRecordsCanceledOutcome(t *testing.T) {
 	if !strings.Contains(sub.TestOutput, "canceled by user") {
 		t.Fatalf("output %q missing canceled marker", sub.TestOutput)
 	}
-	if !strings.Contains(sub.TestOutput, "partial\n") {
+	if !strings.Contains(sub.TestOutput, "partial output") {
 		t.Fatalf("output %q lost the runner output captured before cancel", sub.TestOutput)
 	}
 	if sub.Passed != nil {
