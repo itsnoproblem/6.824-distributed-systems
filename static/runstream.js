@@ -44,7 +44,9 @@
 
     cancelBtn.addEventListener("click", function () {
       cancelBtn.disabled = true;
-      fetch(pane.dataset.cancelUrl, { method: "POST" }).catch(function () {
+      fetch(pane.dataset.cancelUrl, { method: "POST" }).then(function (res) {
+        if (!res.ok) { cancelBtn.disabled = false; }
+      }).catch(function () {
         cancelBtn.disabled = false;
       });
       // No UI update here: cancellation surfaces through the stream's done
