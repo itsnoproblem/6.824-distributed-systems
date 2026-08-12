@@ -38,13 +38,15 @@
     es.onerror = function () {
       // Broken stream (server restart, proxy hiccup): fall back to a single
       // delayed section reload — the server-rendered result includes the
-      // 3s-polling fallback if the run is still going.
+      // polling fallback if the run is still going.
       setTimeout(refresh, 3000);
     };
 
     cancelBtn.addEventListener("click", function () {
       cancelBtn.disabled = true;
-      fetch(pane.dataset.cancelUrl, { method: "POST" });
+      fetch(pane.dataset.cancelUrl, { method: "POST" }).catch(function () {
+        cancelBtn.disabled = false;
+      });
       // No UI update here: cancellation surfaces through the stream's done
       // event and the section re-render.
     });
