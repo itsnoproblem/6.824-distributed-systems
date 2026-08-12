@@ -17,6 +17,15 @@ func TestNewServer(t *testing.T) {
 	if srv.ReadHeaderTimeout != 5*time.Second {
 		t.Errorf("ReadHeaderTimeout = %v, want 5s", srv.ReadHeaderTimeout)
 	}
+	if srv.ReadTimeout != time.Minute {
+		t.Errorf("ReadTimeout = %v, want 1m", srv.ReadTimeout)
+	}
+	if srv.IdleTimeout != 2*time.Minute {
+		t.Errorf("IdleTimeout = %v, want 2m", srv.IdleTimeout)
+	}
+	if srv.WriteTimeout != 0 {
+		t.Errorf("WriteTimeout = %v, want 0 — eval runs block the response for minutes", srv.WriteTimeout)
+	}
 	if srv.Handler == nil {
 		t.Error("Handler not set")
 	}

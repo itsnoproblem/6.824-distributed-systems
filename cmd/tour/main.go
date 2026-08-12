@@ -35,10 +35,14 @@ func newMux() *http.ServeMux {
 // non-loopback deployment isn't left open to Slowloris-style connection
 // exhaustion (CodeAnt CWE-400 finding).
 func newServer(cfg config.Config, mux *http.ServeMux) *http.Server {
+	// No WriteTimeout: lab/exercise submissions hold the response open while
+	// `go test` runs, which can legitimately take minutes.
 	return &http.Server{
 		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       time.Minute,
+		IdleTimeout:       2 * time.Minute,
 	}
 }
 

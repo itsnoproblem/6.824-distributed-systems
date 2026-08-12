@@ -11,7 +11,9 @@ FROM golang:1.25
 WORKDIR /app
 COPY --from=build /out/tour /app/tour
 COPY content /app/content
-ENV PORT=8080 DATA_DIR=/data CONTENT_DIR=/app/content LAB_REPO_DIR=/lab \
+# HOST=0.0.0.0: the app defaults to loopback, but the container must accept
+# Docker's port-forwarded traffic; exposure is governed by the compose ports map.
+ENV HOST=0.0.0.0 PORT=8080 DATA_DIR=/data CONTENT_DIR=/app/content LAB_REPO_DIR=/lab \
     GOCACHE=/tmp/gocache GOMODCACHE=/tmp/gomod
 EXPOSE 8080
 ENTRYPOINT ["/app/tour"]
