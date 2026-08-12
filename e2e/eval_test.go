@@ -114,7 +114,7 @@ type stubLab struct {
 }
 
 func (s stubLab) Snapshot(string, []string) (map[string]string, error) { return s.files, nil }
-func (s stubLab) RunTests(context.Context, string, []string, time.Duration) (string, error) {
+func (s stubLab) RunTests(context.Context, string, []string, time.Duration, func(string)) (string, error) {
 	return s.out, s.err
 }
 

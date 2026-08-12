@@ -7,10 +7,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/itsnoproblem/mit-distributed-systems/internal/course"
+	"github.com/itsnoproblem/mit-distributed-systems/internal/runstream"
 	"github.com/itsnoproblem/mit-distributed-systems/pkg/api"
 )
 
@@ -31,7 +33,8 @@ type LLM interface {
 // FSLabRepo; may be nil in tests that don't exercise labs).
 type LabRepo interface {
 	Snapshot(workdir string, globs []string) (map[string]string, error)
-	RunTests(ctx context.Context, workdir string, cmd []string, timeout time.Duration) (string, error)
+	RunTests(ctx context.Context, workdir string, cmd []string,
+		timeout time.Duration, sink func(string)) (string, error)
 }
 
 type SubmissionRepo interface {
@@ -46,6 +49,7 @@ type SubmissionRepo interface {
 
 type StepEvalView struct {
 	Enabled    bool
+	Live       bool // a run for the latest submission is streaming right now
 	Step       course.Step
 	Submission *Submission
 	Evaluation *Evaluation
@@ -61,6 +65,7 @@ type Service struct {
 	guidanceDir string
 	runAsync    func(func())
 	now         func() time.Time
+	broker      *runstream.Broker
 }
 
 type Option func(*Service)
@@ -82,6 +87,7 @@ func NewService(c CourseRepo, subs SubmissionRepo, p ProgressMarker, llm LLM, la
 		course: c, subs: subs, progress: p, llm: llm, lab: lab,
 		rubrics: rubrics, guidanceDir: filepath.Join(contentDir, "guidance"),
 		runAsync: func(f func()) { go f() }, now: time.Now,
+		broker: runstream.NewBroker(),
 	}
 	for _, o := range opts {
 		o(s)
@@ -206,13 +212,31 @@ func (s *Service) SubmitLab(ctx context.Context, ref course.StepRef) error {
 	if err := s.progress.SetComplete(ctx, ref, true); err != nil {
 		return err
 	}
-	s.runAsync(func() { s.evaluateLab(id) })
+	s.startLabRun(id)
 	return nil
 }
 
-// evaluateLab runs in the background with its own context; every failure
-// lands on the submission row, never in a log the user can't see.
-func (s *Service) evaluateLab(id int64) {
+func labRunKey(id int64) string { return "lab/" + strconv.FormatInt(id, 10) }
+
+// startLabRun registers the live run BEFORE scheduling the pipeline
+// goroutine, so a Watch/Cancel arriving right after the submit response
+// always finds it.
+func (s *Service) startLabRun(id int64) {
+	runCtx, cancel := context.WithCancel(context.Background())
+	live := s.broker.Register(labRunKey(id), cancel)
+	s.runAsync(func() {
+		defer cancel()
+		s.evaluateLab(runCtx, id, live)
+	})
+}
+
+// evaluateLab runs in the background; every failure lands on the submission
+// row, never in a log the user can't see. Persistence always uses a fresh
+// background context (it must survive after runCtx is canceled by Cancel or
+// by startLabRun's deferred cancel on exit); only the test run itself is
+// bound to runCtx, so a cancel actually stops the subprocess.
+func (s *Service) evaluateLab(runCtx context.Context, id int64, live *runstream.Run) {
+	defer live.Finish() // idempotent; releases subscribers on every exit path
 	ctx := context.Background()
 	sub, err := s.subs.GetSubmission(ctx, id)
 	if err != nil {
@@ -225,7 +249,12 @@ func (s *Service) evaluateLab(id int64) {
 		return
 	}
 	_ = s.subs.UpdateSubmission(ctx, id, StatusRunning, "")
-	out, err := s.lab.RunTests(ctx, step.Eval.Workdir, step.Eval.TestCmd, step.Eval.Timeout)
+	out, err := s.lab.RunTests(runCtx, step.Eval.Workdir, step.Eval.TestCmd, step.Eval.Timeout, live.Append)
+	live.Finish() // test phase over: release stream subscribers before the LLM phase
+	if live.Canceled() {
+		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\ncanceled by user")
+		return
+	}
 	if err != nil {
 		_ = s.subs.UpdateSubmission(ctx, id, StatusFailed, out+"\n\nRUNNER ERROR: "+err.Error())
 		return
@@ -300,9 +329,40 @@ func (s *Service) Retry(ctx context.Context, id int64) error {
 		}
 		return s.evaluateQuestion(ctx, id)
 	default:
-		s.runAsync(func() { s.evaluateLab(id) })
+		s.startLabRun(id)
 		return nil
 	}
+}
+
+// Watch subscribes to the live output of a submission's run. For a
+// submission with no live run (finished, interrupted, or in its LLM phase)
+// it synthesizes an immediate done event so late connections degrade
+// gracefully instead of erroring.
+func (s *Service) Watch(ctx context.Context, id int64) (<-chan runstream.Event, error) {
+	if _, err := s.subs.GetSubmission(ctx, id); err != nil {
+		return nil, fmt.Errorf("%w: submission %d", api.ErrNotFound, id)
+	}
+	if run, ok := s.broker.Get(labRunKey(id)); ok {
+		return run.Subscribe(ctx), nil
+	}
+	ch := make(chan runstream.Event, 1)
+	ch <- runstream.Event{Kind: runstream.KindDone}
+	close(ch)
+	return ch, nil
+}
+
+// Cancel kills the live run for a submission. Only the test-execution phase
+// is cancelable; afterwards the run is no longer live and this rejects.
+func (s *Service) Cancel(ctx context.Context, id int64) error {
+	if _, err := s.subs.GetSubmission(ctx, id); err != nil {
+		return fmt.Errorf("%w: submission %d", api.ErrNotFound, id)
+	}
+	run, ok := s.broker.Get(labRunKey(id))
+	if !ok {
+		return fmt.Errorf("%w: submission %d has no live run", api.ErrInvalid, id)
+	}
+	run.Cancel()
+	return nil
 }
 
 func (s *Service) StepState(ctx context.Context, ref course.StepRef) (StepEvalView, error) {
@@ -318,6 +378,9 @@ func (s *Service) StepState(ctx context.Context, ref course.StepRef) (StepEvalVi
 	if sub != nil {
 		if view.Evaluation, err = s.subs.EvaluationForSubmission(ctx, sub.ID); err != nil {
 			return StepEvalView{}, err
+		}
+		if sub.Kind == KindLab && (sub.Status == StatusPending || sub.Status == StatusRunning) {
+			_, view.Live = s.broker.Get(labRunKey(sub.ID))
 		}
 	}
 	return view, nil
