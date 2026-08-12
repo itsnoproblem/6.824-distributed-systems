@@ -99,6 +99,7 @@ type ExerciseVM struct {
 	Output               string
 	SubmissionID         int64
 	FeedbackEnabled      bool
+	Live                 bool
 	Report               *ReportVM
 }
 
